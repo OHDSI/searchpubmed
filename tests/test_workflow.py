@@ -1,21 +1,20 @@
-"""Replacement test_workflow.py
+"""Replacement test_workflow.py (v2)
 ------------------------------------------------
-A self‑contained smoke‑test for the public
-`searchpubmed.pubmed.fetch_pubmed_fulltexts` entry‑point.
-The test stubs out **all** network traffic so it can run
-completely offline and deterministically in CI.
+End‑to‑end smoke‑test for `searchpubmed.pubmed.fetch_pubmed_fulltexts`.
+All external HTTP traffic is stubbed so the suite runs offline.
 """
 
 from __future__ import annotations
 
 import textwrap
 import requests
+import pandas as pd
 import searchpubmed.pubmed as p
 
 # ---------------------------------------------------------------------------
 # Tiny stand‑in for ``requests.Response``
 # ---------------------------------------------------------------------------
-class R:  # pragma: no cover – trivial helper used only in tests
+class R:  # pragma: no cover – trivial helper
     """A *very* small subset of :pyclass:`requests.Response`."""
 
     def __init__(self, text: str, code: int = 200):
@@ -24,8 +23,7 @@ class R:  # pragma: no cover – trivial helper used only in tests
         self.status_code = code
         self.ok = code == 200
 
-    # The library under test calls only ``raise_for_status``; provide it.
-    def raise_for_status(self) -> None:  # pragma: no cover – trivial helper
+    def raise_for_status(self) -> None:  # pragma: no cover
         if not self.ok:
             raise requests.HTTPError(response=self)
 
@@ -34,17 +32,14 @@ class R:  # pragma: no cover – trivial helper used only in tests
 # ---------------------------------------------------------------------------
 
 def test_fetch_pubmed_fulltexts(monkeypatch):
-    """End‑to‑end workflow using canned XML fixtures (no real HTTP)."""
+    """Exercise the full workflow with canned XML fixtures."""
 
-    # --- XML fixtures -------------------------------------------------------
+    # === 1. XML fixtures =====================================================
     esearch_xml = R(
         textwrap.dedent(
             """
             <eSearchResult>
-                <IdList>
-                    <Id>1</Id>
-                    <Id>2</Id>
-                </IdList>
+              <IdList><Id>1</Id><Id>2</Id></IdList>
             </eSearchResult>
             """
         )
@@ -74,16 +69,10 @@ def test_fetch_pubmed_fulltexts(monkeypatch):
                 <MedlineCitation>
                   <PMID>1</PMID>
                   <Article>
-                    <Journal>
-                      <JournalIssue>
-                        <PubDate><Year>2025</Year></PubDate>
-                      </JournalIssue>
-                    </Journal>
+                    <Journal><JournalIssue><PubDate><Year>2025</Year></PubDate></JournalIssue></Journal>
                     <ArticleTitle>T</ArticleTitle>
                     <Abstract><AbstractText>A</AbstractText></Abstract>
-                    <AuthorList>
-                      <Author><LastName>X</LastName></Author>
-                    </AuthorList>
+                    <AuthorList><Author><LastName>X</LastName></Author></AuthorList>
                   </Article>
                 </MedlineCitation>
               </PubmedArticle>
@@ -92,29 +81,31 @@ def test_fetch_pubmed_fulltexts(monkeypatch):
         )
     )
 
-    # --- HTTP monkey‑patches -----------------------------------------------
+    # === 2. Monkey‑patch HTTP layer =========================================
     def fake_post(url, *a, **k):
-        """Return ESearch for search endpoint, else ELink."""
         return esearch_xml if "esearch" in url else elink_xml
 
-    def fake_get(*_a, **_k):  # covers both ``requests.get`` & ``Session.get``
+    def fake_get(*_a, **_k):
         return efetch_xml
 
     monkeypatch.setattr(p.requests, "post", fake_post)
     monkeypatch.setattr(p.requests, "get", fake_get)
-    monkeypatch.setattr(
-        p.requests.Session,
-        "get",
-        lambda self, url, *a, **k: fake_get(url, *a, **k),
-    )
+    monkeypatch.setattr(p.requests.Session, "get", lambda self, url, *a, **k: fake_get(url, *a, **k))
 
-    # Skip the library's ``time.sleep`` back‑off so the test is instant
+    # Skip back‑off delays
     monkeypatch.setattr(p.time, "sleep", lambda *_: None)
 
-    # ------------------------------------------------------------------ run
+    # Supply minimal PMC‑level metadata so downstream merge succeeds
+    monkeypatch.setattr(
+        p,
+        "get_pubmed_metadata_pmcid",
+        lambda pmcids, *a, **k: pd.DataFrame({"pmcid": pmcids})
+    )
+
+    # === 3. Run ==============================================================
     df = p.fetch_pubmed_fulltexts("anything", retmax=2)
 
-    # ---------------------------------------------------------------- assert
+    # === 4. Assert ===========================================================
     assert list(df.columns) == ["pmid", "pmcid", "title"]
     assert df.iloc[0].pmid == "1"
     assert df.iloc[0].pmcid == "PMC10"
