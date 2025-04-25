@@ -1051,7 +1051,7 @@ def fetch_pubmed_fulltexts(
     )  # key = pmcid
     # Rename every column other than the join key
     pmc_meta_df = pmc_meta_df.rename(
-        columns={c: f"{c}_pmcid" for c in pmc_meta_df.columns if c != "pmcid"}
+        columns={c: f"{c}_pmcid" for c in pmc_meta_df.columns if c not in ["pmcid", "pmid"]}
     )
 
     # ── 5) Full texts (XML + flat HTML) ────────────────────────────────────
@@ -1071,9 +1071,10 @@ def fetch_pubmed_fulltexts(
     # ── 6) Assemble & return ───────────────────────────────────────────────
     logger.info("Step 6/6: Final merge")
     pmcid_level = (
-        xml_df.merge(flat_df, on="pmcid", how="outer")
-              .merge(pmc_meta_df, on="pmcid", how="left")
-              .fillna("N/A")
+        xml_df
+          .merge(flat_df, on="pmcid", how="outer")
+          .merge(pmc_meta_df, on=["pmcid", "pmid"], how="left")
+          .fillna("N/A")
     )
 
     wide = (
