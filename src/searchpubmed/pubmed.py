@@ -556,10 +556,10 @@ def get_pubmed_metadata_pmcid(
         except ET.ParseError as e:
             logger.error(f"Batch {idx+1}: XML parse error {e}")
             for cid in chunk:
-                records.append({k: "N/A" for k in (
+                records.append({"pmcid": cid, **{k: "N/A" for k in (
                     "pmid", "title", "abstract", "journal", "publicationDate",
                     "doi", "firstAuthor", "lastAuthor", "authorAffiliations",
-                    "meshTags", "keywords")} | {"pmcid": cid})
+                    "meshTags", "keywords")}})
             time.sleep(delay)
             continue
 
