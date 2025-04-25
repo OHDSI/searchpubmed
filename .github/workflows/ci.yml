@@ -1,0 +1,21 @@
+# .github/workflows/ci.yml
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .[dev] coverage[toml] pytest pytest-cov
+      - run: pytest --cov=searchpubmed --cov-report=xml
+      - uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}   # not needed for public repos
