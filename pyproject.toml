@@ -1,0 +1,78 @@
+[build-system]
+requires      = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# --------------------------------------------------------------------------
+[project]
+name        = "searchpubmed"
+version     = "0.1.0"
+description = "High-level helpers for PubMed search, metadata & full-text retrieval."
+readme      = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+
+authors = [
+  { name = "Gowtham Rao", email = "rao@ohdsi.org" },
+]
+maintainers = [
+  { name = "Gowtham Rao", email = "rao@ohdsi.org" },
+]
+
+dependencies = [
+  "requests>=2.31",
+  "pandas>=1.5",
+  "beautifulsoup4>=4.12",
+  "dateparser>=1.1",
+]
+
+keywords = ["PubMed", "OHDSI", "Epidemiology", "Literature"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+# --------------------------------------------------------------------------
+[project.optional-dependencies]
+dev = [
+  "pytest>=7",
+  "pytest-cov>=6",  # <-- add this line
+  "requests-mock>=1.11",
+  "flake8>=6",
+  "black>=24",
+  "mypy>=1.9",
+  "isort>=5.13"
+]
+
+
+# --------------------------------------------------------------------------
+[project.urls]
+Homepage      = "https://github.com/OHDSI/SearchPubmed"
+Changelog     = "https://github.com/OHDSI/SearchPubmed/releases"
+Documentation = "https://github.com/OHDSI/SearchPubmed/wiki"
+
+# --------------------------------------------------------------------------
+# setuptools-specific tweaks
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+# Auto-discover all packages under src/
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# --------------------------------------------------------------------------
+# House-style tools
+[tool.black]
+line-length    = 88
+target-version = ["py39", "py310", "py311", "py312"]
+
+[tool.isort]
+profile = "black"
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore   = ["E203", "W503"]
