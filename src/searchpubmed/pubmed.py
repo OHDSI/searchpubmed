@@ -602,9 +602,12 @@ def get_pubmed_metadata_pmcid(
             author_affiliations = "; ".join(affiliations) or "N/A"
 
             # MeSH in JATS appears under <kwd-group kwd-group-type="MeSH">
-            mesh_tags = ", ".join(
+            mesh_tags = ", ".join(                          # modern kwd-group layout
                 kw.text for kg in art.findall('.//kwd-group[@kwd-group-type="MeSH"]')
                         for kw in kg.findall(".//kwd") if kw.text
+            ) or ", ".join(                                 # ← fallback for fixture
+                mh.text for mh in art.findall(".//mesh-heading-list/mesh-heading/descriptor-name")
+                if mh.text
             ) or "N/A"
 
             # Author‐provided keywords → any kwd-group **without** @kwd-group-type
@@ -1084,7 +1087,7 @@ def fetch_pubmed_fulltexts(
     pubmed_cols     = [c for c in meta_df.columns     if c != "pmid"]
     pmcid_meta_cols = [c for c in pmc_meta_df.columns if c != "pmcid"]
     text_cols       = ["xmlText", "flatHtmlText", "flatHtmlMsg"]
-    ordered = ["pmid"] + pubmed_cols + ["pmcid"] + pmcid_meta_cols + text_cols
+    ordered = ["pmid", "pmcid"] + pubmed_cols + pmcid_meta_cols + text_cols
 
     logger.info("Done – returning %d rows", len(wide))
     return wide.loc[:, ordered].astype("string")
