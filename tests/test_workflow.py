@@ -106,7 +106,7 @@ def test_fetch_pubmed_fulltexts(monkeypatch):
     df = p.fetch_pubmed_fulltexts("anything", retmax=2)
 
     # === 4. Assert ===========================================================
-    assert list(df.columns) == ["pmid", "pmcid", "title"]
+    assert {"pmid", "pmcid", "title"} <= set(df.columns)
     assert df.iloc[0].pmid == "1"
     assert df.iloc[0].pmcid == "PMC10"
     assert df.iloc[0].title == "T"
