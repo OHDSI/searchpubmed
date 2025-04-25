@@ -1042,16 +1042,22 @@ def fetch_pubmed_fulltexts(
         timeout=timeout, max_retries=max_retries, delay=delay
     )  # key = pmid
 
-    # ── 4) PMC-level metadata ──────────────────────────────────────────────
+    # ── 4) PMC‐level metadata ───────────────────────────────────────────────
     logger.info("Step 4/6: PMC metadata (PMCID-level)")
     pmcids = map_df["pmcid"].dropna().unique().tolist()
-    pmc_meta_df = get_pubmed_metadata_pmcid(
+    raw_pmc_meta = get_pubmed_metadata_pmcid(
         pmcids, api_key=api_key, batch_size=batch_size,
         timeout=timeout, max_retries=max_retries, delay=delay
-    )  # key = pmcid
-    # Rename every column other than the join key
-    pmc_meta_df = pmc_meta_df.rename(
-        columns={c: f"{c}_pmcid" for c in pmc_meta_df.columns if c not in ["pmcid", "pmid"]}
+    )  # key = pmcid only
+
+    # bring pmid into the PMC‐meta table so we can do a two‐key merge later
+    pmc_meta_df = (
+        map_df[["pmid", "pmcid"]]
+        .drop_duplicates()
+        .merge(raw_pmc_meta, on="pmcid", how="right")
+        .rename(columns={
+            c: f"{c}_pmcid" for c in raw_pmc_meta.columns if c != "pmcid"
+        })
     )
 
     # ── 5) Full texts (XML + flat HTML) ────────────────────────────────────
@@ -1059,36 +1065,35 @@ def fetch_pubmed_fulltexts(
     xml_df = get_pmc_full_xml(
         pmcids, api_key=api_key, batch_size=batch_size,
         timeout=timeout, max_retries=max_retries, delay=delay
-    )                           # pmcid, fullXML
+    ).rename(columns={"fullXML": "xmlText"})
     flat_df = get_pmc_html_text(
         pmcids, timeout=timeout, max_retries=max_retries, delay=delay
-    )                           # pmcid, htmlText, scrapeMsg
-    # Normalise column names
-    xml_df  = xml_df.rename(columns={"fullXML": "xmlText"})
-    flat_df = flat_df.rename(columns={"htmlText": "flatHtmlText",
-                                      "scrapeMsg": "flatHtmlMsg"})
+    ).rename(columns={
+        "htmlText": "flatHtmlText",
+        "scrapeMsg": "flatHtmlMsg"
+    })
 
     # ── 6) Assemble & return ───────────────────────────────────────────────
     logger.info("Step 6/6: Final merge")
-    pmcid_level = (
-        xml_df
-          .merge(flat_df, on="pmcid", how="outer")
-          .merge(pmc_meta_df, on=["pmcid", "pmid"], how="left")
-          .fillna("N/A")
-    )
+    # join XML + HTML on pmcid
+    pmcid_texts = xml_df.merge(flat_df, on="pmcid", how="outer")
 
+    # final “wide” join: map_df brings in pmid & pmcid, so the two-key merge works
     wide = (
         map_df
-        .merge(meta_df,     on="pmid",  how="left")
-        .merge(pmcid_level, on="pmcid", how="left")
+        .merge(meta_df,      on="pmid",               how="left")
+        .merge(pmcid_texts,  on="pmcid",              how="outer")
+        .merge(pmc_meta_df,  on=["pmcid", "pmid"],    how="left")
         .fillna("N/A")
     )
 
     # Column order: PMID-block | PMCID-block | texts
-    pubmed_cols     = [c for c in meta_df.columns     if c != "pmid"]
-    pmcid_meta_cols = [c for c in pmc_meta_df.columns if c != "pmcid"]
+    pubmed_cols     = [c for c in meta_df.columns if c != "pmid"]
+    pmcid_meta_cols = [c for c in pmc_meta_df.columns if c not in ("pmcid", "pmid")]
     text_cols       = ["xmlText", "flatHtmlText", "flatHtmlMsg"]
+
     ordered = ["pmid", "pmcid"] + pubmed_cols + pmcid_meta_cols + text_cols
 
     logger.info("Done – returning %d rows", len(wide))
     return wide.loc[:, ordered].astype("string")
+
