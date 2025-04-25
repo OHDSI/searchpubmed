@@ -92,7 +92,8 @@ def get_pmid_from_pubmed(
             return []
 
     try:
-        root = ET.fromstring(resp.content)
+        xml_payload = getattr(resp, "content", None) or resp.text
+        root = ET.fromstring(xml_payload)
         pmids = [id_el.text for id_el in root.findall(".//IdList/Id") if id_el.text]
         # Deduplicate while preserving order
         seen: set[str] = set()
@@ -543,10 +544,10 @@ def get_pubmed_metadata_pmcid(
         if resp is None or not resp.ok:
             # total failure → placeholder rows
             for cid in chunk:
-                records.append({k: "N/A" for k in (
+                records.append({"pmcid": cid, **{k: "N/A" for k in (
                     "pmid", "title", "abstract", "journal", "publicationDate",
                     "doi", "firstAuthor", "lastAuthor", "authorAffiliations",
-                    "meshTags", "keywords")} | {"pmcid": cid})
+                    "meshTags", "keywords")} })
             continue
 
         # ── XML parse ─────────────────────────────────────────
@@ -564,7 +565,7 @@ def get_pubmed_metadata_pmcid(
 
         # ── Extract per-article metadata ──────────────────────
         for art in root.findall(".//article"):
-            pmcid = art.findtext('.//article-id[@pub-id-type="pmc"]', default="N/A")
+            pmcid = art.findtext('.//article-id[@pub-id-type="pmcid"]', default="N/A")
             pmid  = art.findtext('.//article-id[@pub-id-type="pmid"]', default="N/A")
             title = (art.findtext(".//article-title", default="N/A") or "").strip()
 
