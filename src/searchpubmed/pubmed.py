@@ -1053,11 +1053,13 @@ def fetch_pubmed_fulltexts(
     # bring pmid into the PMC‐meta table so we can do a two‐key merge later
     pmc_meta_df = (
         map_df[["pmid", "pmcid"]]
-        .drop_duplicates()
-        .merge(raw_pmc_meta, on="pmcid", how="right")
-        .rename(columns={
-            c: f"{c}_pmcid" for c in raw_pmc_meta.columns if c != "pmcid"
-        })
+            .drop_duplicates()
+            .merge(raw_pmc_meta, on="pmcid", how="left")
+            .rename(
+                columns=lambda c: f"{c}_pmcid"           # add the suffix …
+                         if c not in {"pmid", "pmcid"}   # … except for the keys
+                         else c
+            )
     )
 
     # ── 5) Full texts (XML + flat HTML) ────────────────────────────────────
