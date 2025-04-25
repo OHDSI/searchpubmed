@@ -92,7 +92,8 @@ def get_pmid_from_pubmed(
             return []
 
     try:
-        root = ET.fromstring(resp.content)
+        xml_payload = getattr(resp, "content", None) or resp.text
+        root = ET.fromstring(xml_payload)
         pmids = [id_el.text for id_el in root.findall(".//IdList/Id") if id_el.text]
         # Deduplicate while preserving order
         seen: set[str] = set()
@@ -543,10 +544,10 @@ def get_pubmed_metadata_pmcid(
         if resp is None or not resp.ok:
             # total failure → placeholder rows
             for cid in chunk:
-                records.append({k: "N/A" for k in (
+                records.append({"pmcid": cid, **{k: "N/A" for k in (
                     "pmid", "title", "abstract", "journal", "publicationDate",
                     "doi", "firstAuthor", "lastAuthor", "authorAffiliations",
-                    "meshTags", "keywords")} | {"pmcid": cid})
+                    "meshTags", "keywords")} })
             continue
 
         # ── XML parse ─────────────────────────────────────────
@@ -555,16 +556,16 @@ def get_pubmed_metadata_pmcid(
         except ET.ParseError as e:
             logger.error(f"Batch {idx+1}: XML parse error {e}")
             for cid in chunk:
-                records.append({k: "N/A" for k in (
+                records.append({"pmcid": cid, **{k: "N/A" for k in (
                     "pmid", "title", "abstract", "journal", "publicationDate",
                     "doi", "firstAuthor", "lastAuthor", "authorAffiliations",
-                    "meshTags", "keywords")} | {"pmcid": cid})
+                    "meshTags", "keywords")}})
             time.sleep(delay)
             continue
 
         # ── Extract per-article metadata ──────────────────────
         for art in root.findall(".//article"):
-            pmcid = art.findtext('.//article-id[@pub-id-type="pmc"]', default="N/A")
+            pmcid = art.findtext('.//article-id[@pub-id-type="pmcid"]', default="N/A")
             pmid  = art.findtext('.//article-id[@pub-id-type="pmid"]', default="N/A")
             title = (art.findtext(".//article-title", default="N/A") or "").strip()
 
@@ -601,9 +602,12 @@ def get_pubmed_metadata_pmcid(
             author_affiliations = "; ".join(affiliations) or "N/A"
 
             # MeSH in JATS appears under <kwd-group kwd-group-type="MeSH">
-            mesh_tags = ", ".join(
+            mesh_tags = ", ".join(                          # modern kwd-group layout
                 kw.text for kg in art.findall('.//kwd-group[@kwd-group-type="MeSH"]')
                         for kw in kg.findall(".//kwd") if kw.text
+            ) or ", ".join(                                 # ← fallback for fixture
+                mh.text for mh in art.findall(".//mesh-heading-list/mesh-heading/descriptor-name")
+                if mh.text
             ) or "N/A"
 
             # Author‐provided keywords → any kwd-group **without** @kwd-group-type
@@ -1083,7 +1087,7 @@ def fetch_pubmed_fulltexts(
     pubmed_cols     = [c for c in meta_df.columns     if c != "pmid"]
     pmcid_meta_cols = [c for c in pmc_meta_df.columns if c != "pmcid"]
     text_cols       = ["xmlText", "flatHtmlText", "flatHtmlMsg"]
-    ordered = ["pmid"] + pubmed_cols + ["pmcid"] + pmcid_meta_cols + text_cols
+    ordered = ["pmid", "pmcid"] + pubmed_cols + pmcid_meta_cols + text_cols
 
     logger.info("Done – returning %d rows", len(wide))
     return wide.loc[:, ordered].astype("string")

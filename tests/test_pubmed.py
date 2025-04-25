@@ -230,3 +230,4 @@ def test_full_text_complete_failure(monkeypatch):
 
     out = p.get_pmc_full_text(["PMC1", "PMC2"])
     assert out == {"PMC1": "N/A", "PMC2": "N/A"}
+
