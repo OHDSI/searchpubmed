@@ -3,7 +3,14 @@ from __future__ import annotations
 ##############################################################################
 #  Imports & logger                                                          #
 ##############################################################################
-import logging
+import logging, sys
+
+logging.basicConfig(
+    level=logging.INFO,                    # allow INFO and above
+    stream=sys.stdout,                     # send to notebook output
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+    force=True)                            # override Databricks defaults
+    
 import re
 import time
 import xml.etree.ElementTree as ET
