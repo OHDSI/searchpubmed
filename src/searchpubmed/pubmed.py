@@ -1044,7 +1044,6 @@ def fetch_pubmed_fulltexts(
     n_unique = len(set(pmids))
     logger.info("ESearch returned %d unique PMIDs for %r", n_unique, query)
 
-
     pmid_pmcid = map_pmids_to_pmcids(
         pmids, api_key=api_key, batch_size=batch_size,
         timeout=timeout, max_retries=max_retries, delay=delay
@@ -1142,7 +1141,6 @@ def fetch_pubmed_fulltexts(
 
     # 4️⃣  Standardise missing values
     wide = wide_3.fillna("N/A")
-
 
     # Column order: PMID-block | PMCID-block | texts
     pubmed_cols     = [c for c in meta_df.columns if c != "pmid"]
