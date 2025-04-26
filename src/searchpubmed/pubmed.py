@@ -1126,6 +1126,8 @@ def fetch_pubmed_fulltexts(
     print("success wide 2", flush=True)
     
     print(pmc_meta_df.columns)
+    
+    print(wide_2.columns)
 
     # 3️⃣  Attach extra PMC-level metadata
     wide_3 = wide_2.merge(
