@@ -1230,6 +1230,7 @@ def fetch_pubmed_fulltexts(
         on="pmid",
         how="left"
     )
+    print("success wide 1", flush=True)
 
     # 2️⃣  Bring in full-text (PMC) records
     wide_2 = wide_1.merge(
@@ -1237,6 +1238,7 @@ def fetch_pubmed_fulltexts(
         on="pmcid",
         how="left" 
     )
+    print("success wide 2", flush=True)
 
     # 3️⃣  Attach extra PMC-level metadata
     wide_3 = wide_2.merge(
@@ -1244,6 +1246,7 @@ def fetch_pubmed_fulltexts(
         on=["pmcid", "pmid"],
         how="left"
     )
+    print("success wide 3", flush=True)
 
     # 4️⃣  Standardise missing values
     wide = wide_3.fillna("N/A")

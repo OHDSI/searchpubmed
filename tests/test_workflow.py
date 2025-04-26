@@ -3,10 +3,11 @@ from __future__ import annotations
 import textwrap
 import requests
 import pandas as pd
+
 import searchpubmed.pubmed as p
 
 # ---------------------------------------------------------------------------
-# Tiny stand‑in for ``requests.Response``
+# Tiny stand-in for ``requests.Response``
 # ---------------------------------------------------------------------------
 class R:  # pragma: no cover – trivial helper
     """A *very* small subset of :pyclass:`requests.Response`."""
@@ -24,7 +25,6 @@ class R:  # pragma: no cover – trivial helper
 # ---------------------------------------------------------------------------
 # Main workflow test
 # ---------------------------------------------------------------------------
-
 def test_fetch_pubmed_fulltexts(monkeypatch):
     """Exercise the full workflow with canned XML fixtures."""
 
@@ -75,7 +75,7 @@ def test_fetch_pubmed_fulltexts(monkeypatch):
         )
     )
 
-    # === 2. Monkey‑patch HTTP layer =========================================
+    # === 2. Monkey-patch HTTP layer =========================================
     def fake_post(url, *a, **k):
         return esearch_xml if "esearch" in url else elink_xml
 
@@ -84,16 +84,24 @@ def test_fetch_pubmed_fulltexts(monkeypatch):
 
     monkeypatch.setattr(p.requests, "post", fake_post)
     monkeypatch.setattr(p.requests, "get", fake_get)
-    monkeypatch.setattr(p.requests.Session, "get", lambda self, url, *a, **k: fake_get(url, *a, **k))
+    monkeypatch.setattr(
+        p.requests.Session, "get", lambda self, url, *a, **k: fake_get(url, *a, **k)
+    )
 
-    # Skip back‑off delays
+    # Skip back-off delays
     monkeypatch.setattr(p.time, "sleep", lambda *_: None)
 
-    # Supply minimal PMC‑level metadata so downstream merge succeeds
+    # Supply minimal PMC-level metadata so downstream merge succeeds
     monkeypatch.setattr(
         p,
         "get_pubmed_metadata_pmcid",
-        lambda pmcids, *a, **k: pd.DataFrame({"pmcid": pmcids})
+        lambda pmcids, *a, **k: pd.DataFrame(
+            {
+                "pmcid": pmcids,
+                # Provide a dummy PMID for each PMCID so .groupby("pmid") works
+                "pmid": [str(i + 1) for i in range(len(pmcids))],
+            }
+        ),
     )
 
     # === 3. Run ==============================================================
@@ -104,4 +112,4 @@ def test_fetch_pubmed_fulltexts(monkeypatch):
     required_cols = {"pmid", "pmcid", "title"}
     assert required_cols.issubset(df.columns)
     assert df.iloc[0].pmid == "1"
-    assert df.iloc[0].pmcid  # non‑empty
+    assert df.iloc[0].pmcid  # non-empty
