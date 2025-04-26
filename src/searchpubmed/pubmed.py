@@ -10,6 +10,9 @@ logging.basicConfig(
     stream=sys.stdout,                     # send to notebook output
     format="%(asctime)s %(levelname)s %(name)s - %(message)s",
     force=True)                            # override Databricks defaults
+
+import importlib, searchpubmed.pubmed as pubmed
+importlib.reload(pubmed)
     
 import re
 import time
@@ -1196,6 +1199,7 @@ def fetch_pubmed_fulltexts(
     # join XML + HTML on pmcid
     pmcid_texts = xml_df.merge(flat_df, on="pmcid", how="outer")
     
+    logger.info("Step 6/6: Final merge 2")
     # ── summary: XML vs. flat-HTML availability ──────────────────────────────
     # 1. normalise the two DataFrames to one row per PMCID
     xml_ok   = xml_df.dropna(subset=["xmlText"])[["pmcid"]].drop_duplicates()
@@ -1219,13 +1223,31 @@ def fetch_pubmed_fulltexts(
     )
 
     # final “wide” join: map_df brings in pmid & pmcid, so the two-key merge works
-    wide = (
-        map_df
-        .merge(meta_df,      on="pmid",               how="left")
-        .merge(pmcid_texts,  on="pmcid",              how="outer")
-        .merge(pmc_meta_df,  on=["pmcid", "pmid"],    how="left")
-        .fillna("N/A")
+    
+    # 1️⃣  Add PubMed-level metadata
+    wide_1 = map_df.merge(
+        meta_df,           # PubMed metadata
+        on="pmid",
+        how="left"
     )
+
+    # 2️⃣  Bring in full-text (PMC) records
+    wide_2 = wide_1.merge(
+        pmcid_texts,       # PMC full-text and derived fields
+        on="pmcid",
+        how="left" 
+    )
+
+    # 3️⃣  Attach extra PMC-level metadata
+    wide_3 = wide_2.merge(
+        pmc_meta_df,       # “pmcid • pmid” keyed table
+        on=["pmcid", "pmid"],
+        how="left"
+    )
+
+    # 4️⃣  Standardise missing values
+    wide = wide_3.fillna("N/A")
+
 
     # Column order: PMID-block | PMCID-block | texts
     pubmed_cols     = [c for c in meta_df.columns if c != "pmid"]
