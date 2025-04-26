@@ -1123,7 +1123,7 @@ def fetch_pubmed_fulltexts(
     # 2️⃣  Bring in full-text (PMC) records
     wide_2 = wide_1.merge(
         pmcid_texts,       # PMC full-text and derived fields
-        on="pmcid",
+        on=["pmcid", "pmid"],
         how="left" 
     )
     print("success wide 2", flush=True)
