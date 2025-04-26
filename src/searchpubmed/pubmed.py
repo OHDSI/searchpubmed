@@ -1090,7 +1090,6 @@ def fetch_pubmed_fulltexts(
         .drop_duplicates(subset="pmcid", keep="first")   # ⬅️ same idea
     )
 
-    print("difficult")
     # ── 6) Assemble & return ───────────────────────────────────────────────
     logger.info("Step 6/6: Final merge 1")
     # join XML + HTML on pmcid
@@ -1125,6 +1124,8 @@ def fetch_pubmed_fulltexts(
         how="left" 
     )
     print("success wide 2", flush=True)
+    
+    print(pmc_meta_df.columns)
 
     # 3️⃣  Attach extra PMC-level metadata
     wide_3 = wide_2.merge(
