@@ -1110,12 +1110,15 @@ def fetch_pubmed_fulltexts(
     # final “wide” join: pmid_pmcid brings in pmid & pmcid, so the two-key merge works
     
     # 1️⃣  Add PubMed-level metadata
+    print(pmid_pmcid.columns)
+    print(meta_df.columns)
     wide_1 = pmid_pmcid.merge(
         meta_df,           # PubMed metadata
         on="pmid",
         how="left"
     )
     print("success wide 1", flush=True)
+    print(wide_1.columns)
 
     # 2️⃣  Bring in full-text (PMC) records
     wide_2 = wide_1.merge(
