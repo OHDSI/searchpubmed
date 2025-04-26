@@ -3,7 +3,17 @@ from __future__ import annotations
 ##############################################################################
 #  Imports & logger                                                          #
 ##############################################################################
-import logging
+import logging, sys
+
+logging.basicConfig(
+    level=logging.INFO,                    # allow INFO and above
+    stream=sys.stdout,                     # send to notebook output
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+    force=True)                            # override Databricks defaults
+
+import importlib, searchpubmed.pubmed as pubmed
+importlib.reload(pubmed)
+    
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -1021,7 +1031,7 @@ def fetch_pubmed_fulltexts(
     The column order in the final frame is:
         [pmid] + PubMed-meta + [pmcid] + PMC-meta(_pmcid) + text columns
     """
-    logger.info("Step 1/6: PubMed search")
+    
     pmids = get_pmid_from_pubmed(
         query, retmax=retmax, api_key=api_key,
         timeout=timeout, max_retries=max_retries, delay=delay
@@ -1029,63 +1039,110 @@ def fetch_pubmed_fulltexts(
     if not pmids:
         logger.warning("No PMIDs returned – exiting early")
         return pd.DataFrame().astype("string")
+        
+    # ── how many unique PMIDs did we get? ────────────────────────────────
+    n_unique = len(set(pmids))
+    logger.info("ESearch returned %d unique PMIDs for %r", n_unique, query)
 
-    logger.info("Step 2/6: PMID ↔ PMCID mapping")
-    map_df = map_pmids_to_pmcids(
+
+    pmid_pmcid = map_pmids_to_pmcids(
         pmids, api_key=api_key, batch_size=batch_size,
         timeout=timeout, max_retries=max_retries, delay=delay
-    )  # columns: pmid, pmcid
+    )  # columns: pmid, pmcid  
 
-    logger.info("Step 3/6: PubMed metadata (PMID-level)")
+  
     meta_df = get_pubmed_metadata_pmid(
         pmids, api_key=api_key, batch_size=batch_size,
         timeout=timeout, max_retries=max_retries, delay=delay
     )  # key = pmid
 
     # ── 4) PMC‐level metadata ───────────────────────────────────────────────
-    logger.info("Step 4/6: PMC metadata (PMCID-level)")
-    pmcids = map_df["pmcid"].dropna().unique().tolist()
-    raw_pmc_meta = get_pubmed_metadata_pmcid(
+
+    pmcids = pmid_pmcid["pmcid"].dropna().unique().tolist()
+    pmc_meta_df = get_pubmed_metadata_pmcid(
         pmcids, api_key=api_key, batch_size=batch_size,
         timeout=timeout, max_retries=max_retries, delay=delay
-    )  # key = pmcid only
-
-    # bring pmid into the PMC‐meta table so we can do a two‐key merge later
-    pmc_meta_df = (
-        map_df[["pmid", "pmcid"]]
-        .drop_duplicates()
-        .merge(raw_pmc_meta, on="pmcid", how="right")
-        .rename(columns={
-            c: f"{c}_pmcid" for c in raw_pmc_meta.columns if c != "pmcid"
-        })
+    )  # key = pmid and pmcid
+    
+    # rename every column except the two keys
+    pmc_meta_df = pmc_meta_df.rename(
+        columns=lambda c: f"{c}_pmcid" if c not in {"pmid", "pmcid"} else c
     )
+
+
 
     # ── 5) Full texts (XML + flat HTML) ────────────────────────────────────
-    logger.info("Step 5/6: Full-text download from PMC")
-    xml_df = get_pmc_full_xml(
-        pmcids, api_key=api_key, batch_size=batch_size,
-        timeout=timeout, max_retries=max_retries, delay=delay
-    ).rename(columns={"fullXML": "xmlText"})
-    flat_df = get_pmc_html_text(
-        pmcids, timeout=timeout, max_retries=max_retries, delay=delay
-    ).rename(columns={
-        "htmlText": "flatHtmlText",
-        "scrapeMsg": "flatHtmlMsg"
-    })
+
+    xml_df = (
+        get_pmc_full_xml(
+            pmcids, api_key=api_key, batch_size=batch_size,
+            timeout=timeout, max_retries=max_retries, delay=delay
+        )
+        .rename(columns={"fullXML": "xmlText"})
+        .drop_duplicates(subset="pmcid", keep="first")   # ⬅️ one row per pmcid
+    )
+
+    flat_df = (
+        get_pmc_html_text(
+            pmcids, timeout=timeout, max_retries=max_retries, delay=delay
+        )
+        .rename(columns={"htmlText": "flatHtmlText", "scrapeMsg": "flatHtmlMsg"})
+        .drop_duplicates(subset="pmcid", keep="first")   # ⬅️ same idea
+    )
 
     # ── 6) Assemble & return ───────────────────────────────────────────────
-    logger.info("Step 6/6: Final merge")
+    logger.info("Step 6/6: Final merge 1")
     # join XML + HTML on pmcid
-    pmcid_texts = xml_df.merge(flat_df, on="pmcid", how="outer")
-
-    # final “wide” join: map_df brings in pmid & pmcid, so the two-key merge works
-    wide = (
-        map_df
-        .merge(meta_df,      on="pmid",               how="left")
-        .merge(pmcid_texts,  on="pmcid",              how="outer")
-        .merge(pmc_meta_df,  on=["pmcid", "pmid"],    how="left")
-        .fillna("N/A")
+    # 1) bring in the JATS XML
+    pmcid_text = pmid_pmcid.merge(
+        xml_df,                 # ← fullXML column lives here
+        on="pmcid",
+        how="left"
     )
+
+    # 2) add the flat HTML
+    pmcid_texts = pmcid_text.merge(
+        flat_df,                # ← htmlText & scrapeMsg columns
+        on="pmcid",
+        how="left"
+    )
+    
+    # final “wide” join: pmid_pmcid brings in pmid & pmcid, so the two-key merge works
+    
+    # 1️⃣  Add PubMed-level metadata
+    print(pmid_pmcid.columns)
+    print(meta_df.columns)
+    wide_1 = pmid_pmcid.merge(
+        meta_df,           # PubMed metadata
+        on="pmid",
+        how="left"
+    )
+    print("success wide 1", flush=True)
+    print(wide_1.columns)
+
+    # 2️⃣  Bring in full-text (PMC) records
+    wide_2 = wide_1.merge(
+        pmcid_texts,       # PMC full-text and derived fields
+        on=["pmcid", "pmid"],
+        how="left" 
+    )
+    print("success wide 2", flush=True)
+    
+    print(pmc_meta_df.columns)
+    
+    print(wide_2.columns)
+
+    # 3️⃣  Attach extra PMC-level metadata
+    wide_3 = wide_2.merge(
+        pmc_meta_df,       # “pmcid • pmid” keyed table
+        on=["pmcid", "pmid"],
+        how="left"
+    )
+    print("success wide 3", flush=True)
+
+    # 4️⃣  Standardise missing values
+    wide = wide_3.fillna("N/A")
+
 
     # Column order: PMID-block | PMCID-block | texts
     pubmed_cols     = [c for c in meta_df.columns if c != "pmid"]
