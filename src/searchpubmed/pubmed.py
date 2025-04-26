@@ -1029,38 +1029,147 @@ def fetch_pubmed_fulltexts(
     if not pmids:
         logger.warning("No PMIDs returned – exiting early")
         return pd.DataFrame().astype("string")
+        
+    # ── how many unique PMIDs did we get? ────────────────────────────────
+    n_unique = len(set(pmids))
+    logger.info("ESearch returned %d unique PMIDs for %r", n_unique, query)
 
     logger.info("Step 2/6: PMID ↔ PMCID mapping")
     map_df = map_pmids_to_pmcids(
         pmids, api_key=api_key, batch_size=batch_size,
         timeout=timeout, max_retries=max_retries, delay=delay
     )  # columns: pmid, pmcid
+    
+    # ── summary stats on the PMID ↔ PMCID mapping ───────────────────────
+    if not map_df.empty:
+        # how many PMIDs got at least one PMCID?
+        counts_per_pmid = map_df.groupby("pmid")["pmcid"].nunique()
+        n_with_pmcid     = counts_per_pmid.size
+        pct_with_pmcid   = 100 * n_with_pmcid / len(pmids)
+
+        # basic distribution of “PMCID per PMID”
+        stats = counts_per_pmid.describe()  # count, mean, std, min, 25%, 50%, 75%, max
+
+        logger.info(
+            " - PMCID mapping: %d of %d PMIDs have at least one PMCID (%.1f%%)",
+            n_with_pmcid, len(pmids), pct_with_pmcid,
+        )
+        logger.info(
+            " - PMCID-per-PMID distribution — "
+            " -  - mean: %.2f | median: %.0f | min: %d | 25%%: %.0f | 75%%: %.0f | max: %d",
+            stats['mean'],                       # average PMCID count
+            stats['50%'],                        # median
+            stats['min'],                        # smallest
+            stats['25%'], stats['75%'],          # IQR bounds
+            stats['max'],                        # largest
+        )
+    else:
+        logger.info("PMCID mapping: no PMIDs received a PMCID.")
 
     logger.info("Step 3/6: PubMed metadata (PMID-level)")
     meta_df = get_pubmed_metadata_pmid(
         pmids, api_key=api_key, batch_size=batch_size,
         timeout=timeout, max_retries=max_retries, delay=delay
     )  # key = pmid
+    
+    # ── distribution of PMIDs by publication year ───────────────────────
+    if not meta_df.empty and "publicationDate" in meta_df.columns:
+        # make sure publicationDate is a proper datetime
+        pub_dates = pd.to_datetime(
+            meta_df["publicationDate"], errors="coerce", utc=True
+        )
+
+        # drop rows without a valid date
+        valid_dates = pub_dates.dropna()
+        if not valid_dates.empty:
+            year_counts = valid_dates.dt.year.value_counts().sort_index()
+
+            # simple “table”–style log: YYYY => count
+            logger.info(
+                "Publication-year distribution (YYYY → #PMIDs): %s",
+                ", ".join(f"{yr}:{cnt}" for yr, cnt in year_counts.items()),
+            )
+
+            # optional extra summary
+            logger.info(
+                "Years covered: %d–%d (%d unique years)",
+                year_counts.index.min(),
+                year_counts.index.max(),
+                year_counts.size,
+            )
+        else:
+            logger.info("No valid publicationDate values to summarise.")
+    else:
+        logger.info(
+            "meta_df is empty or lacks a 'publicationDate' column; "
+            "skipping year-distribution logging."
+        )
+
 
     # ── 4) PMC‐level metadata ───────────────────────────────────────────────
     logger.info("Step 4/6: PMC metadata (PMCID-level)")
     pmcids = map_df["pmcid"].dropna().unique().tolist()
-    raw_pmc_meta = get_pubmed_metadata_pmcid(
+    pmc_meta_df = get_pubmed_metadata_pmcid(
         pmcids, api_key=api_key, batch_size=batch_size,
         timeout=timeout, max_retries=max_retries, delay=delay
-    )  # key = pmcid only
-
-    # bring pmid into the PMC‐meta table so we can do a two‐key merge later
-    pmc_meta_df = (
-        map_df[["pmid", "pmcid"]]
-            .drop_duplicates()
-            .merge(raw_pmc_meta, on="pmcid", how="left")
-            .rename(
-                columns=lambda c: f"{c}_pmcid"           # add the suffix …
-                         if c not in {"pmid", "pmcid"}   # … except for the keys
-                         else c
-            )
+    )  # key = pmid and pmcid
+    
+    # rename every column except the two keys
+    pmc_meta_df = pmc_meta_df.rename(
+        columns=lambda c: f"{c}_pmcid" if c not in {"pmid", "pmcid"} else c
     )
+    
+    # ── summary stats on the PMID ↔ PMCID relationship (pmc_meta_df) ────────
+    if not pmc_meta_df.empty:
+        # ── 1.  How many PMIDs map to multiple PMCIDs?
+        pmcid_per_pmid = pmc_meta_df.groupby("pmid")["pmcid"].nunique()
+        n_pmids           = pmcid_per_pmid.size
+        n_multi_pmcid     = (pmcid_per_pmid > 1).sum()
+        pct_multi_pmcid   = 100 * n_multi_pmcid / n_pmids
+
+        # distribution of PMCIDs *per* PMID
+        stats_pp = pmcid_per_pmid.describe()      # count, mean, std, min, 25 %, 50 %, 75 %, max
+
+        # ── 2.  How many PMCIDs map to multiple PMIDs?
+        pmid_per_pmcid = pmc_meta_df.groupby("pmcid")["pmid"].nunique()
+        n_pmcids        = pmid_per_pmcid.size
+        n_multi_pmid    = (pmid_per_pmcid > 1).sum()
+        pct_multi_pmid  = 100 * n_multi_pmid / n_pmcids
+
+        # distribution of PMIDs *per* PMCID
+        stats_ppc = pmid_per_pmcid.describe()
+
+        logger.info(
+            " - pmc_meta_df: %d rows | %d unique PMIDs | %d unique PMCIDs",
+            len(pmc_meta_df), n_pmids, n_pmcids,
+        )
+
+        logger.info(
+            " - PMCIDs-per-PMID: %d of %d PMIDs have >1 PMCID (%.1f%%)",
+            n_multi_pmcid, n_pmids, pct_multi_pmcid,
+        )
+        logger.info(
+            "   • distribution — mean: %.2f | median: %.0f | min: %d | 25%%: %.0f | "
+            "75%%: %.0f | max: %d",
+            stats_pp['mean'], stats_pp['50%'], stats_pp['min'],
+            stats_pp['25%'], stats_pp['75%'], stats_pp['max'],
+        )
+
+        logger.info(
+            " - PMIDs-per-PMCID: %d of %d PMCIDs have >1 PMID (%.1f%%)",
+            n_multi_pmid, n_pmcids, pct_multi_pmid,
+        )
+        logger.info(
+            "   • distribution — mean: %.2f | median: %.0f | min: %d | 25%%: %.0f | "
+            "75%%: %.0f | max: %d",
+            stats_ppc['mean'], stats_ppc['50%'], stats_ppc['min'],
+            stats_ppc['25%'], stats_ppc['75%'], stats_ppc['max'],
+        )
+    else:
+        logger.info("pmc_meta_df is empty; no PMID↔PMCID relationship statistics to report.")
+
+
+    logger.info("Step 2/6: PMID ↔ PMCID mapping")
 
     # ── 5) Full texts (XML + flat HTML) ────────────────────────────────────
     logger.info("Step 5/6: Full-text download from PMC")
@@ -1079,6 +1188,28 @@ def fetch_pubmed_fulltexts(
     logger.info("Step 6/6: Final merge")
     # join XML + HTML on pmcid
     pmcid_texts = xml_df.merge(flat_df, on="pmcid", how="outer")
+    
+    # ── summary: XML vs. flat-HTML availability ──────────────────────────────
+    # 1. normalise the two DataFrames to one row per PMCID
+    xml_ok   = xml_df.dropna(subset=["xmlText"])[["pmcid"]].drop_duplicates()
+    html_ok  = flat_df.dropna(subset=["flatHtmlText"])[["pmcid"]].drop_duplicates()
+
+    # 2. cardinalities
+    n_xml   = xml_ok["pmcid"].nunique()
+    n_html  = html_ok["pmcid"].nunique()
+
+    xml_set  = set(xml_ok["pmcid"])
+    html_set = set(html_ok["pmcid"])
+
+    n_both       = len(xml_set & html_set)
+    n_only_xml   = len(xml_set - html_set)
+    n_only_html  = len(html_set - xml_set)
+
+    logger.info(
+        " - Full-text counts — XML: %d | flat HTML: %d | only XML: %d | "
+        "only HTML: %d | both: %d",
+        n_xml, n_html, n_only_xml, n_only_html, n_both,
+    )
 
     # final “wide” join: map_df brings in pmid & pmcid, so the two-key merge works
     wide = (
