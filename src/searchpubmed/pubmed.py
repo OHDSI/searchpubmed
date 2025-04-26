@@ -1045,7 +1045,7 @@ def fetch_pubmed_fulltexts(
     logger.info("ESearch returned %d unique PMIDs for %r", n_unique, query)
 
     logger.info("Step 2/6: PMID ↔ PMCID mapping")
-    map_df = map_pmids_to_pmcids(
+    pmid_pmcid = map_pmids_to_pmcids(
         pmids, api_key=api_key, batch_size=batch_size,
         timeout=timeout, max_retries=max_retries, delay=delay
     )  # columns: pmid, pmcid  
@@ -1058,7 +1058,7 @@ def fetch_pubmed_fulltexts(
 
     # ── 4) PMC‐level metadata ───────────────────────────────────────────────
     logger.info("Step 4/6: PMC metadata (PMCID-level)")
-    pmcids = map_df["pmcid"].dropna().unique().tolist()
+    pmcids = pmid_pmcid["pmcid"].dropna().unique().tolist()
     pmc_meta_df = get_pubmed_metadata_pmcid(
         pmcids, api_key=api_key, batch_size=batch_size,
         timeout=timeout, max_retries=max_retries, delay=delay
@@ -1084,34 +1084,28 @@ def fetch_pubmed_fulltexts(
         "scrapeMsg": "flatHtmlMsg"
     })
 
+    print("difficult")
     # ── 6) Assemble & return ───────────────────────────────────────────────
     logger.info("Step 6/6: Final merge 1")
     # join XML + HTML on pmcid
     # 1) bring in the JATS XML
-    pmcid_text = pmc_meta_df.merge(
+    pmcid_text = pmid_pmcid.merge(
         xml_df,                 # ← fullXML column lives here
         on="pmcid",
-        how="left",             # keep every meta row
-        validate="1:1"          # guard against accidental dupes (optional)
+        how="left"
     )
 
     # 2) add the flat HTML
     pmcid_texts = pmcid_text.merge(
         flat_df,                # ← htmlText & scrapeMsg columns
         on="pmcid",
-        how="left",
-        validate="1:1"          # optional but recommended
+        how="left"
     )
-
-    # pmcid_texts now contains every column from:
-    #   • pmc_meta_df  (metadata)
-    #   • xml_df       (fullXML)
-    #   • flat_df      (htmlText, scrapeMsg)
     
-    # final “wide” join: map_df brings in pmid & pmcid, so the two-key merge works
+    # final “wide” join: pmid_pmcid brings in pmid & pmcid, so the two-key merge works
     
     # 1️⃣  Add PubMed-level metadata
-    wide_1 = map_df.merge(
+    wide_1 = pmid_pmcid.merge(
         meta_df,           # PubMed metadata
         on="pmid",
         how="left"
