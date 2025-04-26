@@ -1031,7 +1031,7 @@ def fetch_pubmed_fulltexts(
     The column order in the final frame is:
         [pmid] + PubMed-meta + [pmcid] + PMC-meta(_pmcid) + text columns
     """
-    logger.info("Step 1/6: PubMed search")
+    
     pmids = get_pmid_from_pubmed(
         query, retmax=retmax, api_key=api_key,
         timeout=timeout, max_retries=max_retries, delay=delay
