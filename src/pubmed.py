@@ -1063,12 +1063,12 @@ def fetch_pubmed_fulltexts(
         pmcids, api_key=api_key, batch_size=batch_size,
         timeout=timeout, max_retries=max_retries, delay=delay
     )  # key = pmid and pmcid
-    
+    print(pmc_meta_df.columns)
     # rename every column except the two keys
     pmc_meta_df = pmc_meta_df.rename(
         columns=lambda c: f"{c}_pmcid" if c not in {"pmid", "pmcid"} else c
     )
-
+    print(pmc_meta_df.columns)
 
 
     # ── 5) Full texts (XML + flat HTML) ────────────────────────────────────
