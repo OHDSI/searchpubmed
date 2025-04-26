@@ -1068,8 +1068,6 @@ def fetch_pubmed_fulltexts(
         columns=lambda c: f"{c}_pmcid" if c not in {"pmid", "pmcid"} else c
     )
 
-
-
     # ── 5) Full texts (XML + flat HTML) ────────────────────────────────────
 
     xml_df = (
@@ -1109,15 +1107,11 @@ def fetch_pubmed_fulltexts(
     # final “wide” join: pmid_pmcid brings in pmid & pmcid, so the two-key merge works
     
     # 1️⃣  Add PubMed-level metadata
-    print(pmid_pmcid.columns)
-    print(meta_df.columns)
     wide_1 = pmid_pmcid.merge(
         meta_df,           # PubMed metadata
         on="pmid",
         how="left"
     )
-    print("success wide 1", flush=True)
-    print(wide_1.columns)
 
     # 2️⃣  Bring in full-text (PMC) records
     wide_2 = wide_1.merge(
@@ -1125,11 +1119,6 @@ def fetch_pubmed_fulltexts(
         on=["pmcid", "pmid"],
         how="left" 
     )
-    print("success wide 2", flush=True)
-    
-    print(pmc_meta_df.columns)
-    
-    print(wide_2.columns)
 
     # 3️⃣  Attach extra PMC-level metadata
     wide_3 = wide_2.merge(
@@ -1137,7 +1126,6 @@ def fetch_pubmed_fulltexts(
         on=["pmcid", "pmid"],
         how="left"
     )
-    print("success wide 3", flush=True)
 
     # 4️⃣  Standardise missing values
     wide = wide_3.fillna("N/A")
