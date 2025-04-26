@@ -1044,20 +1044,20 @@ def fetch_pubmed_fulltexts(
     n_unique = len(set(pmids))
     logger.info("ESearch returned %d unique PMIDs for %r", n_unique, query)
 
-    logger.info("Step 2/6: PMID ↔ PMCID mapping")
+
     pmid_pmcid = map_pmids_to_pmcids(
         pmids, api_key=api_key, batch_size=batch_size,
         timeout=timeout, max_retries=max_retries, delay=delay
     )  # columns: pmid, pmcid  
 
-    logger.info("Step 3/6: PubMed metadata (PMID-level)")
+  
     meta_df = get_pubmed_metadata_pmid(
         pmids, api_key=api_key, batch_size=batch_size,
         timeout=timeout, max_retries=max_retries, delay=delay
     )  # key = pmid
 
     # ── 4) PMC‐level metadata ───────────────────────────────────────────────
-    logger.info("Step 4/6: PMC metadata (PMCID-level)")
+
     pmcids = pmid_pmcid["pmcid"].dropna().unique().tolist()
     pmc_meta_df = get_pubmed_metadata_pmcid(
         pmcids, api_key=api_key, batch_size=batch_size,
@@ -1069,10 +1069,10 @@ def fetch_pubmed_fulltexts(
         columns=lambda c: f"{c}_pmcid" if c not in {"pmid", "pmcid"} else c
     )
 
-    logger.info("Step 2/6: PMID ↔ PMCID mapping")
+
 
     # ── 5) Full texts (XML + flat HTML) ────────────────────────────────────
-    logger.info("Step 5/6: Full-text download from PMC")
+
     xml_df = (
         get_pmc_full_xml(
             pmcids, api_key=api_key, batch_size=batch_size,
