@@ -1073,16 +1073,22 @@ def fetch_pubmed_fulltexts(
 
     # ── 5) Full texts (XML + flat HTML) ────────────────────────────────────
     logger.info("Step 5/6: Full-text download from PMC")
-    xml_df = get_pmc_full_xml(
-        pmcids, api_key=api_key, batch_size=batch_size,
-        timeout=timeout, max_retries=max_retries, delay=delay
-    ).rename(columns={"fullXML": "xmlText"})
-    flat_df = get_pmc_html_text(
-        pmcids, timeout=timeout, max_retries=max_retries, delay=delay
-    ).rename(columns={
-        "htmlText": "flatHtmlText",
-        "scrapeMsg": "flatHtmlMsg"
-    })
+    xml_df = (
+        get_pmc_full_xml(
+            pmcids, api_key=api_key, batch_size=batch_size,
+            timeout=timeout, max_retries=max_retries, delay=delay
+        )
+        .rename(columns={"fullXML": "xmlText"})
+        .drop_duplicates(subset="pmcid", keep="first")   # ⬅️ one row per pmcid
+    )
+
+    flat_df = (
+        get_pmc_html_text(
+            pmcids, timeout=timeout, max_retries=max_retries, delay=delay
+        )
+        .rename(columns={"htmlText": "flatHtmlText", "scrapeMsg": "flatHtmlMsg"})
+        .drop_duplicates(subset="pmcid", keep="first")   # ⬅️ same idea
+    )
 
     print("difficult")
     # ── 6) Assemble & return ───────────────────────────────────────────────
