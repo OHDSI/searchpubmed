@@ -1,39 +1,21 @@
 from __future__ import annotations
-"""searchpubmed.query_builder ― opinionated helper for composing PubMed
-Boolean expressions **plus five ready‑made strategies**.
-
-Usage examples
---------------
->>> from searchpubmed.query_builder import (
-...     QueryOptions, build_query,
-...     STRATEGY1_OPTS, STRATEGY2_OPTS, STRATEGY3_OPTS)
->>> print(build_query(STRATEGY1_OPTS)[:120])
-(("Databases, Factual"[MeSH] OR "Electronic Health Records"[MeSH] ...
-
-Quick reference
----------------
-* :class:`QueryOptions` ― high‑level knobs (data_sources, design_terms,
-  start_year, etc.).
-* :func:`build_query(opts)` ― turn those knobs into a Boolean string.
-* **STRATEGY*\_OPTS** ― pre‑configured :class:`QueryOptions` objects.
-
-------------------------------------------
-
+"""searchpubmed.query_builder – helper for composing PubMed Boolean
+expressions plus **six** ready‑made query strategies.
 """
+
 from dataclasses import dataclass, field
 from typing import List, Sequence, Optional
 
 __all__ = [
-    # public builder API
     "QueryOptions", "build_query",
-    # QueryOptions presets
     "STRATEGY1_OPTS", "STRATEGY2_OPTS", "STRATEGY3_OPTS",
-    "STRATEGY4_OPTS", "STRATEGY5_OPTS",
+    "STRATEGY4_OPTS", "STRATEGY5_OPTS", "STRATEGY6_OPTS",
 ]
 
 # ──────────────────────────────────────────────────────────────
-# Synonym dictionaries (extensible by users)
+# Synonym dictionaries (extensible)
 # ──────────────────────────────────────────────────────────────
+
 _DATA_SOURCE_SYNONYMS = {
     "ehr": [
         '"Electronic Health Records"[MeSH]',
@@ -58,10 +40,10 @@ _DATA_SOURCE_SYNONYMS = {
     ],
     "realworld": [
         '"Databases, Factual"[MeSH]',
-        '"Real-World Data"[MeSH]',
-        '"Real-World Evidence"[MeSH]',
-        '"real-world data"[TIAB]',
-        '"real-world evidence"[TIAB]',
+        'Real-World Data[TIAB]',
+        'Real-World Evidence[TIAB]',
+        'real-world data[TIAB]',
+        'real-world evidence[TIAB]',
     ],
     "named": [
         '"SEER"[TIAB]',
@@ -75,7 +57,7 @@ _DATA_SOURCE_SYNONYMS = {
         '"Symphony Health"[TIAB]',
         '"Premier Healthcare"[TIAB]',
         '"Medicare"[TIAB]',
-        '"Medicaid"[TIAB]',    
+        '"Medicaid"[TIAB]',
         '"All-Payer"[TIAB]',
         '"All Payer"[TIAB]',
         '"TriNetX"[TIAB]',
@@ -143,87 +125,77 @@ _DESIGN_SYNONYMS = {
 _EXCLUDE_CT_TERMS = (
     '"Clinical Trials as Topic"[MeSH]',
     '"Controlled Clinical Trials as Topic"[MeSH]',
-    '"Controlled Clinical Trials as Topic"[MeSH]',
     '"Randomized Controlled Trial"[PT]',
-    '"Clinical Trial"[PT]'
+    '"Clinical Trial"[PT]',
 )
 
-_EXCLUDE_GENOME_TERMS = (
-    'genomic[TIAB]',
-    'genome[TIAB]',
-    '"Exome Sequencing"[MeSH]',
-    '"Genome-Wide Association Study"[MeSH]'
-)
-
-_SYSTEMATIC_REVIEW = (
-    '"Systematic Review"[PT]',
-    '"Systematic Reviews as Topic"[MeSH]'
-)
-
-_META_ANALYSIS = (
-    '"Meta-Analysis"[PT]',
-    '"Meta-Analysis as Topic"[MeSH]'
-)
-    
 # ──────────────────────────────────────────────────────────────
 # Public dataclass of options
 # ──────────────────────────────────────────────────────────────
 
 @dataclass
 class QueryOptions:
-    """High-level knobs for building a PubMed Boolean expression."""
+    """High‑level knobs for building a PubMed Boolean query."""
 
-    data_sources: Sequence[str] = field(default_factory=lambda: ["ehr", "claims", "registry", "database", "realworld", "named"])
-    design_terms: Sequence[str] = field(default_factory=lambda: ["observational", "retrospective", "secondary", "cohort", "case_control", "cross_sectional"])
+    data_sources: Sequence[str] = field(default_factory=lambda: [
+        "ehr", "claims", "registry", "realworld", "named"
+    ])
+    design_terms: Sequence[str] = field(default_factory=lambda: [
+        "observational", "retrospective", "secondary", "cohort",
+        "case_control", "cross_sectional"
+    ])
     start_year: Optional[int] = 2010
-    end_year: Optional[int] = None    # inclusive
+    end_year: Optional[int] = None  # inclusive
     restrict_english: bool = True
-    proximity_within: Optional[int] = None  # if set, apply N operator between design+source term
+    proximity_within: Optional[int] = None  # N‑word proximity
     exclude_clinical_trials: bool = False
 
     def _lookup(self, keys: Sequence[str], table: dict[str, List[str]]) -> List[str]:
-        found: List[str] = []
+        out: List[str] = []
         for k in keys:
-            if k not in table:
-                raise KeyError(f"Unknown key: {k}. Allowed: {list(table)[:10]} …")
-            found.extend(table[k])
-        return found
+            try:
+                out.extend(table[k])
+            except KeyError as exc:
+                raise KeyError(
+                    f"Unknown key '{k}'.  Allowed: {list(table)[:10]} …"
+                ) from exc
+        return out
 
 # ──────────────────────────────────────────────────────────────
 # Internal helpers
 # ──────────────────────────────────────────────────────────────
 
 def _apply_proximity(designs: List[str], sources: List[str], N: int) -> List[str]:
-    prox_clauses: List[str] = []
+    prox: List[str] = []
     for d in designs:
-        d_clean = d.rstrip(']').split('[')[0].strip('"')
+        d_clean = d.rstrip("]").split("[")[0].strip('"')
         for s in sources:
-            s_clean = s.rstrip(']').split('[')[0].strip('"')
-            prox_clauses.append(f'"{d_clean}" {N} "{s_clean}"[TIAB]')
-    return prox_clauses
+            s_clean = s.rstrip("]").split("[")[0].strip('"')
+            prox.append(f'"{d_clean}" {N} "{s_clean}"[TIAB]')
+    return prox
 
 # ──────────────────────────────────────────────────────────────
 # Core builder
 # ──────────────────────────────────────────────────────────────
 
 def build_query(opts: QueryOptions) -> str:
-    design_clauses = opts._lookup(opts.design_terms, _DESIGN_SYNONYMS)
-    source_clauses = opts._lookup(opts.data_sources, _DATA_SOURCE_SYNONYMS)
+    """Return a PubMed Boolean expression assembled from *opts*."""
+    design = opts._lookup(opts.design_terms, _DESIGN_SYNONYMS)
+    source = opts._lookup(opts.data_sources, _DATA_SOURCE_SYNONYMS)
 
-    # proximity or simple AND
     if opts.proximity_within is not None:
-        prox_parts = _apply_proximity(design_clauses, source_clauses, opts.proximity_within)
-        core = "(" + " OR ".join(prox_parts) + ")"
+        prox_parts = _apply_proximity(design, source, opts.proximity_within)
+        core = f"({' OR '.join(prox_parts)})"
     else:
-        core = f"(({' OR '.join(source_clauses)}) AND ({' OR '.join(design_clauses)}))"
+        core = f"(({' OR '.join(source)}) AND ({' OR '.join(design)}))"
 
     filters: List[str] = []
     if opts.restrict_english:
         filters.append("english[lang]")
 
     if opts.start_year or opts.end_year:
-        s = str(opts.start_year) if opts.start_year else "1800"
-        e = str(opts.end_year) if opts.end_year else "3000"
+        s = str(opts.start_year or 1800)
+        e = str(opts.end_year or 3000)
         filters.append(f'("{s}"[dp] : "{e}"[dp])')
 
     if opts.exclude_clinical_trials:
@@ -231,9 +203,8 @@ def build_query(opts: QueryOptions) -> str:
 
     return " AND ".join([core] + filters)
 
-
 # ──────────────────────────────────────────────────────────────
-# Five canned QueryOptions presets
+# Strategy presets – identical semantics to upstream
 # ──────────────────────────────────────────────────────────────
 
 # Strategy 1 – Controlled vocabulary
@@ -246,27 +217,33 @@ STRATEGY1_OPTS = QueryOptions(
     exclude_clinical_trials=True,
 )
 
-# Strategy 2 – Controlled and free-name (max sensitivity)
+# Strategy 2 – Controlled + named data sources (max sensitivity)
 STRATEGY2_OPTS = QueryOptions(
     data_sources=["ehr", "claims", "realworld", "named"],
-    design_terms=["observational", "retrospective", "secondary", "research_group", "cohort", "longitudinal"],
+    design_terms=[
+        "observational", "retrospective", "secondary", "research_group",
+        "cohort", "longitudinal",
+    ],
     proximity_within=None,
     restrict_english=True,
     start_year=2010,
     exclude_clinical_trials=True,
 )
 
-# Strategy 3 – Controlled and free-name (max sensitivity) AND Proximity coupling (≤5 words)
+# Strategy 3 – Strategy 2 with proximity coupling (≤ 5 words)
 STRATEGY3_OPTS = QueryOptions(
     data_sources=["ehr", "claims", "realworld", "named"],
-    design_terms=["observational", "retrospective", "secondary", "research_group", "cohort", "longitudinal"],
+    design_terms=[
+        "observational", "retrospective", "secondary", "research_group",
+        "cohort", "longitudinal",
+    ],
     proximity_within=5,
     restrict_english=True,
     start_year=2010,
     exclude_clinical_trials=True,
 )
 
-# Strategy 4 – Controlled and free-name (max sensitivity) AND Tigher Proximity coupling (≤5 words)
+# Strategy 4 – Drop cohort/longitudinal, keep proximity (specific)
 STRATEGY4_OPTS = QueryOptions(
     data_sources=["ehr", "claims", "realworld", "named"],
     design_terms=["observational", "retrospective", "secondary", "research_group"],
@@ -276,7 +253,7 @@ STRATEGY4_OPTS = QueryOptions(
     exclude_clinical_trials=True,
 )
 
-# Strategy 5 – High specificity
+# Strategy 5 – Highest specificity (no named sources, no proximity)
 STRATEGY5_OPTS = QueryOptions(
     data_sources=["ehr", "claims", "realworld"],
     design_terms=["observational", "retrospective", "secondary", "research_group"],
@@ -286,7 +263,7 @@ STRATEGY5_OPTS = QueryOptions(
     exclude_clinical_trials=True,
 )
 
-# Strategy 6 – Highest specificity AND Tigher Proximity coupling (≤5 words)
+# Strategy 6 – Like Strategy 5 but with proximity (specific + context)
 STRATEGY6_OPTS = QueryOptions(
     data_sources=["ehr", "claims", "realworld"],
     design_terms=["observational", "retrospective", "secondary", "research_group"],
