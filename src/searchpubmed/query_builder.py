@@ -58,10 +58,10 @@ _DATA_SOURCE_SYNONYMS = {
     ],
     "realworld": [
         '"Databases, Factual"[MeSH]',
+        '"Real-World Data"[MeSH]',
+        '"Real-World Evidence"[MeSH]',
         '"real-world data"[TIAB]',
         '"real-world evidence"[TIAB]',
-        '"real world data"[TIAB]',
-        '"real world evidence"[TIAB]',
     ],
     "named": [
         '"SEER"[TIAB]',
@@ -170,59 +170,24 @@ _META_ANALYSIS = (
 # ──────────────────────────────────────────────────────────────
 
 @dataclass
-from typing import List
+class QueryOptions:
+    """High-level knobs for building a PubMed Boolean expression."""
 
-def build_query(opts: "QueryOptions") -> str:
-    """
-    Return a PubMed Boolean query string assembled from `opts`.
-    """
-    # ── helper ─────────────────────────────────────────────────────────────
-    def _normalise(term: str) -> str:
-        # remove quotes around hyphenated MeSH terms so PubMed won't warn
-        if term.startswith('"') and term.endswith('"') and '-' in term[1:-1]:
-            term = term.strip('"')
-        return term
+    data_sources: Sequence[str] = field(default_factory=lambda: ["ehr", "claims", "registry", "database", "realworld", "named"])
+    design_terms: Sequence[str] = field(default_factory=lambda: ["observational", "retrospective", "secondary", "cohort", "case_control", "cross_sectional"])
+    start_year: Optional[int] = 2010
+    end_year: Optional[int] = None    # inclusive
+    restrict_english: bool = True
+    proximity_within: Optional[int] = None  # if set, apply N operator between design+source term
+    exclude_clinical_trials: bool = False
 
-    # look-up and clean synonyms
-    design_clauses = [
-        _normalise(t)
-        for t in opts._lookup(opts.design_terms, _DESIGN_SYNONYMS)
-    ]
-    source_clauses = [
-        _normalise(t)
-        for t in opts._lookup(opts.data_sources, _DATA_SOURCE_SYNONYMS)
-    ]
-
-    # ── core block ─────────────────────────────────────────────────────────
-    if opts.proximity_within is not None:
-        prox_parts = _apply_proximity(
-            design_clauses, source_clauses, opts.proximity_within
-        )
-        core = "(" + " OR ".join(prox_parts) + ")"
-    else:
-        # one outer pair shields the intersection from later AND / OR
-        core = (
-            f"( ({' OR '.join(source_clauses)}) "
-            f"AND ({' OR '.join(design_clauses)}) )"
-        )
-
-    # ── filters ────────────────────────────────────────────────────────────
-    filters: List[str] = []
-
-    if opts.restrict_english:
-        filters.append("english[lang]")
-
-    if opts.start_year or opts.end_year:
-        start = str(opts.start_year or 1800)
-        end = str(opts.end_year or 3000)
-        filters.append(f'("{start}"[dp] : "{end}"[dp])')
-
-    if opts.exclude_clinical_trials:
-        filters.append("NOT (" + " OR ".join(_EXCLUDE_CT_TERMS) + ")")
-
-    # ── assemble query ─────────────────────────────────────────────────────
-    return " AND ".join([core] + filters)
-
+    def _lookup(self, keys: Sequence[str], table: dict[str, List[str]]) -> List[str]:
+        found: List[str] = []
+        for k in keys:
+            if k not in table:
+                raise KeyError(f"Unknown key: {k}. Allowed: {list(table)[:10]} …")
+            found.extend(table[k])
+        return found
 
 # ──────────────────────────────────────────────────────────────
 # Internal helpers
@@ -240,58 +205,31 @@ def _apply_proximity(designs: List[str], sources: List[str], N: int) -> List[str
 # ──────────────────────────────────────────────────────────────
 # Core builder
 # ──────────────────────────────────────────────────────────────
-from typing import List
 
-def build_query(opts: "QueryOptions") -> str:
-    """
-    Return a PubMed Boolean query string assembled from `opts`.
+def build_query(opts: QueryOptions) -> str:
+    design_clauses = opts._lookup(opts.design_terms, _DESIGN_SYNONYMS)
+    source_clauses = opts._lookup(opts.data_sources, _DATA_SOURCE_SYNONYMS)
 
-    Changes vs. upstream:
-    ▸ fixes known misspellings (Merativ → Merative)
-    ▸ un-quotes hyphenated MeSH headings (PubMed does not phrase-index them)
-    ▸ keeps a single outer () around (sources AND designs) to protect precedence
-    ▸ emits one [dp] date-range filter; no redundant [pdat] block
-    """
-    # ── helpers ────────────────────────────────────────────────────────────
-    def _normalise(term: str) -> str:
-        term = term.replace("Merativ", "Merative")
-        if term.startswith('"') and term.endswith('"') and '-' in term[1:-1]:
-            term = term.strip('"')            # drop quotes around hyphenated MeSH
-        return term
-
-    # look-up and clean synonyms
-    design_clauses  = [_normalise(t)
-                       for t in opts._lookup(opts.design_terms,  _DESIGN_SYNONYMS)]
-    source_clauses  = [_normalise(t)
-                       for t in opts._lookup(opts.data_sources, _DATA_SOURCE_SYNONYMS)]
-
-    # ── core block ─────────────────────────────────────────────────────────
+    # proximity or simple AND
     if opts.proximity_within is not None:
-        prox_parts = _apply_proximity(design_clauses,
-                                      source_clauses,
-                                      opts.proximity_within)
-        core = "(" + " OR ".join(prox_parts) + ")"          # already bracketed
+        prox_parts = _apply_proximity(design_clauses, source_clauses, opts.proximity_within)
+        core = "(" + " OR ".join(prox_parts) + ")"
     else:
-        # ONE outer pair shields the intersection from later AND / OR
-        core = f"( ({' OR '.join(source_clauses)}) AND ({' OR '.join(design_clauses)}) )"
+        core = f"(({' OR '.join(source_clauses)}) AND ({' OR '.join(design_clauses)}))"
 
-    # ── filters ────────────────────────────────────────────────────────────
     filters: List[str] = []
-
     if opts.restrict_english:
         filters.append("english[lang]")
 
     if opts.start_year or opts.end_year:
-        start = str(opts.start_year or 1800)
-        end   = str(opts.end_year   or 3000)
-        filters.append(f'("{start}"[dp] : "{end}"[dp])')
+        s = str(opts.start_year) if opts.start_year else "1800"
+        e = str(opts.end_year) if opts.end_year else "3000"
+        filters.append(f'("{s}"[dp] : "{e}"[dp])')
 
     if opts.exclude_clinical_trials:
         filters.append("NOT (" + " OR ".join(_EXCLUDE_CT_TERMS) + ")")
 
-    # ── assemble query ─────────────────────────────────────────────────────
     return " AND ".join([core] + filters)
-
 
 
 # ──────────────────────────────────────────────────────────────
