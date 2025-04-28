@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 # --------------------------------------------------------------------------
 [project]
 name        = "searchpubmed"
-version     = "0.2.6"
+version     = "0.3.0"
 description = "High-level helpers for PubMed search, metadata & full-text retrieval."
 readme      = "README.md"
 requires-python = ">=3.9"
