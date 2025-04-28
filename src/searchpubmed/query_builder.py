@@ -6,8 +6,7 @@ Usage examples
 --------------
 >>> from searchpubmed.query_builder import (
 ...     QueryOptions, build_query,
-...     STRATEGY1_OPTS, STRATEGY2_OPTS, STRATEGY3_OPTS,
-...     STRATEGY4_OPTS, STRATEGY5_OPTS)
+...     STRATEGY1_OPTS, STRATEGY2_OPTS, STRATEGY3_OPTS)
 >>> print(build_query(STRATEGY1_OPTS)[:120])
 (("Databases, Factual"[MeSH] OR "Electronic Health Records"[MeSH] ...
 
@@ -16,20 +15,10 @@ Quick reference
 * :class:`QueryOptions` ― high‑level knobs (data_sources, design_terms,
   start_year, etc.).
 * :func:`build_query(opts)` ― turn those knobs into a Boolean string.
-* **STRATEGY*\_OPTS** ― five pre‑configured :class:`QueryOptions` objects.
-* **STRATEGY*\_QUERY** ― frozen Boolean strings (built from the presets).
+* **STRATEGY*\_OPTS** ― pre‑configured :class:`QueryOptions` objects.
 
-Canned strategies (2010+, English‑language)
 ------------------------------------------
-===================  ============================================================
-Constant name          Design goal
-===================  ============================================================
-STRATEGY1_OPTS / _QUERY  Highest recall / lowest precision (controlled vocab only)
-STRATEGY2_OPTS / _QUERY  Add free‑text synonyms for max sensitivity
-STRATEGY3_OPTS / _QUERY  Proximity coupling between design & data terms
-STRATEGY4_OPTS / _QUERY  Named databases + moderate NOT block
-STRATEGY5_OPTS / _QUERY  High specificity (hedges + strict NOT)
-===================  ============================================================
+
 """
 from dataclasses import dataclass, field
 from typing import List, Sequence, Optional
@@ -37,9 +26,6 @@ from typing import List, Sequence, Optional
 __all__ = [
     # public builder API
     "QueryOptions", "build_query",
-    # frozen Boolean strings
-    "STRATEGY1_QUERY", "STRATEGY2_QUERY", "STRATEGY3_QUERY",
-    "STRATEGY4_QUERY", "STRATEGY5_QUERY",
     # QueryOptions presets
     "STRATEGY1_OPTS", "STRATEGY2_OPTS", "STRATEGY3_OPTS",
     "STRATEGY4_OPTS", "STRATEGY5_OPTS",
@@ -52,6 +38,7 @@ _DATA_SOURCE_SYNONYMS = {
     "ehr": [
         '"Electronic Health Records"[MeSH]',
         '"Medical Records Systems, Computerized"[MeSH]',
+        "'Routinely Collected Health Data"[MeSH]',
         '"EHR"[TIAB]',
         '"EMR"[TIAB]',
         '"electronic health record"[TIAB]',
@@ -59,6 +46,7 @@ _DATA_SOURCE_SYNONYMS = {
     ],
     "claims": [
         '"Insurance Claim Review"[MeSH]',
+        '"Insurance Claim Reporting"[MeSH]',
         '"claims data"[TIAB]',
         '"administrative data"[TIAB]',
         '"insurance claims"[TIAB]',
@@ -68,12 +56,8 @@ _DATA_SOURCE_SYNONYMS = {
         'registry[TIAB]',
         'registry-based[TIAB]',
     ],
-    "database": [
-        '"Databases, Factual"[MeSH]',
-        'database[TIAB]',
-        'databases[TIAB]',
-    ],
     "realworld": [
+        '"Databases, Factual"[MeSH]',
         '"Real-World Data"[MeSH]',
         '"Real-World Evidence"[MeSH]',
         '"real-world data"[TIAB]',
@@ -87,46 +71,100 @@ _DATA_SOURCE_SYNONYMS = {
         '"Optum"[TIAB]',
         '"Truven"[TIAB]',
         '"IQVIA"[TIAB]',
+        '"PharMetrics"[TIAB]',
+        '"Symphony Health"[TIAB]',
+        '"Premier Healthcare"[TIAB]',
+        '"Medicare"[TIAB]',
+        '"Medicaid"[TIAB]',    
+        '"All-Payer"[TIAB]',
+        '"All Payer"[TIAB]',
+        '"TriNetX"[TIAB]',
+        '"Cerner"[TIAB]',
+        '"Komodo"[TIAB]',
+        '"Kaiser"[TIAB]',
+        '"Explorys"[TIAB]',
+        '"The Health Improvement Network"[TIAB]',
+        '"Vizient"[TIAB]',
+        '"HealthVerity"[TIAB]',
+        '"Datavant"[TIAB]',
+        '"Merativ"[TIAB]',
     ],
 }
 
 _DESIGN_SYNONYMS = {
     "observational": [
         '"Observational Study"[PT]',
+        '"Observational Studies as Topic"[MeSH]',
         'observational[TIAB]',
+        '"observational study"[TIAB]',
+        'observational stud*[TIAB]',
     ],
     "retrospective": [
         '"Retrospective Studies"[MeSH]',
         'retrospective[TIAB]',
+        '"retrospective study"[TIAB]',
     ],
     "secondary": [
-        '"Secondary Analysis"[PT]',
+        '"Secondary Data Analysis"[PT]',
         '"secondary analysis"[TIAB]',
+        '"secondary data analysis"[TIAB]',
     ],
     "cohort": [
         '"Cohort Studies"[MeSH]',
         'cohort[TIAB]',
+        '"cohort study"[TIAB]',
+        'cohort stud*[TIAB]',
     ],
     "case_control": [
         '"Case-Control Studies"[MeSH]',
         '"case-control"[TIAB]',
+        '"case control"[TIAB]',
     ],
     "cross_sectional": [
         '"Cross-Sectional Studies"[MeSH]',
         '"cross-sectional"[TIAB]',
+        '"cross sectional"[TIAB]',
+    ],
+    "research_group": [
+        '"Health Services Research"[MeSH]',
+        '"Outcome Assessment, Health Care"[MeSH]',
+        '"Comparative Effectiveness Research"[MeSH]',
+    ],
+    "prospective": [
+        '"Prospective Studies"[MeSH]',
+        'prospective[TIAB]',
+    ],
+    "longitudinal": [
+        '"Longitudinal Studies"[MeSH]',
+        '"longitudinal study"[TIAB]',
     ],
 }
 
 _EXCLUDE_CT_TERMS = (
+    '"Clinical Trials as Topic"[MeSH]',
+    '"Controlled Clinical Trials as Topic"[MeSH]',
+    '"Controlled Clinical Trials as Topic"[MeSH]',
     '"Randomized Controlled Trial"[PT]',
-    '"Clinical Trial"[PT]',
-    '"Systematic Review"[PT]',
-    '"Meta-Analysis"[PT]',
+    '"Clinical Trial"[PT]'
+)
+
+_EXCLUDE_GENOME_TERMS = (,
     'genomic[TIAB]',
     'genome[TIAB]',
+    '"Exome Sequencing"[MeSH]',
     '"Genome-Wide Association Study"[MeSH]'
 )
 
+_SYSTEMATIC_REVIEW = (
+    '"Systematic Review"[PT]',
+    '"Systematic Reviews as Topic"[MeSH]'
+)
+
+_META_ANALYSIS = (
+    '"Meta-Analysis"[PT]',
+    '"Meta-Analysis as Topic"[MeSH]'
+)
+    
 # ──────────────────────────────────────────────────────────────
 # Public dataclass of options
 # ──────────────────────────────────────────────────────────────
@@ -193,113 +231,66 @@ def build_query(opts: QueryOptions) -> str:
 
     return " AND ".join([core] + filters)
 
-# ──────────────────────────────────────────────────────────────
-# Ready‑made Boolean strings (frozen)
-# ──────────────────────────────────────────────────────────────
-
-STRATEGY1_QUERY = (
-    '(("Databases, Factual"[MeSH] OR "Electronic Health Records"[MeSH] OR '
-    '"Registries"[MeSH] OR "Real-World Data"[MeSH] OR "Real-World Evidence"[MeSH]) '
-    'AND ("Observational Study"[PT] OR "Retrospective Studies"[MeSH] OR '
-    '"Secondary Analysis"[PT])) AND english[lang] AND ("2010"[dp] : "3000"[dp])'
-)
-
-STRATEGY2_QUERY = (
-    '(( "Databases, Factual"[MeSH] OR "Electronic Health Records"[MeSH] OR '
-    '"Medical Records Systems, Computerized"[MeSH] OR "Registries"[MeSH] OR '
-    '"EHR"[TIAB] OR "EMR"[TIAB] OR "electronic health record"[TIAB] OR '
-    '"electronic medical record"[TIAB] OR "claims data"[TIAB] OR '
-    '"administrative data"[TIAB] OR "insurance claims"[TIAB] OR registry[TIAB] '
-    'OR database[TIAB]) AND ("Observational Study"[PT] OR observational[TIAB] OR '
-    '"Retrospective Studies"[MeSH] OR retrospective[TIAB] OR '
-    '"Secondary Analysis"[PT] OR "secondary analysis"[TIAB])) '
-    'AND english[lang] AND ("2010"[dp] : "3000"[dp])'
-)
-
-STRATEGY3_QUERY = (
-    '("observational" 5 "EHR"[TIAB] OR "observational" 5 "EMR"[TIAB] OR '
-    '"observational" 5 "claims data"[TIAB] OR "observational" 5 "registry"[TIAB] OR '
-    '"retrospective" 5 "EHR"[TIAB] OR "retrospective" 5 "EMR"[TIAB] OR '
-    '"retrospective" 5 "claims data"[TIAB] OR "retrospective" 5 "registry"[TIAB] OR '
-    '"secondary analysis" 5 "claims data"[TIAB] OR "secondary analysis" 5 "EHR"[TIAB]) '
-    'AND english[lang] AND ("2010"[dp] : "3000"[dp])'
-)
-
-STRATEGY4_QUERY = (
-    '((( "Electronic Health Records"[MeSH] OR "Databases, Factual"[MeSH] OR '
-    '"Registries"[MeSH] OR "Medical Records Systems, Computerized"[MeSH] OR '
-    '"claims data"[TIAB] OR "administrative data"[TIAB] OR registry[TIAB] OR database[TIAB]) '
-    'AND ("Observational Study"[PT] OR "Retrospective Studies"[MeSH] OR '
-    'observational[TIAB] OR retrospective[TIAB] OR "Secondary Analysis"[TIAB])) '
-    'OR ("SEER"[TIAB] OR "NHANES"[TIAB] OR "CPRD"[TIAB] OR "MarketScan"[TIAB] '
-    'OR "Optum"[TIAB] OR "Truven"[TIAB] OR "IQVIA"[TIAB])) '
-    'AND english[lang] AND ("2010"[dp] : "3000"[dp]) '
-    'NOT ("Randomized Controlled Trial"[PT] OR "Clinical Trial"[PT] OR '
-    '"Systematic Review"[PT] OR "Meta-Analysis"[PT] OR genomic[TIAB] OR genome[TIAB])'
-)
-
-STRATEGY5_QUERY = (
-    '(("Databases, Factual"[MeSH] OR "Electronic Health Records"[MeSH] OR '
-    '"Medical Records Systems, Computerized"[MeSH] OR "Registries"[MeSH] OR '
-    '"Insurance Claim Review"[MeSH]) AND ("Observational Study"[PT] OR '
-    '"Retrospective Studies"[MeSH] OR "Cohort Studies"[MeSH] OR '
-    '"Case-Control Studies"[MeSH] OR "Cross-Sectional Studies"[MeSH] OR '
-    '"Secondary Analysis"[TIAB])) AND english[lang] AND ("2010"[dp] : "3000"[dp]) '
-    'NOT ("Randomized Controlled Trial"[PT] OR "Clinical Trial"[PT] OR '
-    '"Systematic Review"[PT] OR "Meta-Analysis"[PT] OR "Review"[PT] OR '
-    '"Comment"[PT] OR "Letter"[PT] OR "Editorial"[PT] OR (animals[mh] NOT humans[mh]) '
-    'OR genomic[TIAB] OR genome[TIAB] OR "Genome-Wide Association Study"[MeSH])'
-)
 
 # ──────────────────────────────────────────────────────────────
 # Five canned QueryOptions presets
 # ──────────────────────────────────────────────────────────────
 
-# Strategy 1 – Controlled vocabulary sweep
+# Strategy 1 – Controlled vocabulary
 STRATEGY1_OPTS = QueryOptions(
-    data_sources=["database", "ehr", "registry", "realworld"],
-    design_terms=["observational", "retrospective", "secondary"],
-    proximity_within=None,
-    restrict_english=True,
-    start_year=2010,
-    exclude_clinical_trials=False,
-)
-
-# Strategy 2 – Free‑text synonyms (max sensitivity)
-STRATEGY2_OPTS = QueryOptions(
-    data_sources=["database", "ehr", "registry", "realworld", "named"],
-    design_terms=["observational", "retrospective", "secondary"],
-    proximity_within=None,
-    restrict_english=True,
-    start_year=2010,
-    exclude_clinical_trials=False,
-)
-
-# Strategy 3 – Proximity coupling (≤5 words)
-STRATEGY3_OPTS = QueryOptions(
-    data_sources=["database", "ehr", "registry", "realworld", "named"],
-    design_terms=["observational", "retrospective", "secondary"],
-    proximity_within=5,
-    restrict_english=True,
-    start_year=2010,
-    exclude_clinical_trials=False,
-)
-
-# Strategy 4 – Named databases + moderate NOT block
-STRATEGY4_OPTS = QueryOptions(
-    data_sources=["database", "ehr", "registry", "realworld", "named"],
-    design_terms=["observational", "retrospective", "secondary"],
+    data_sources=["ehr", "claims", "realworld"],
+    design_terms=["observational", "retrospective", "secondary", "research_group"],
     proximity_within=None,
     restrict_english=True,
     start_year=2010,
     exclude_clinical_trials=True,
 )
 
-# Strategy 5 – High specificity (strict NOT + hedges)
-STRATEGY5_OPTS = QueryOptions(
-    data_sources=["database", "ehr", "registry"],  # fewer to tighten precision
-    design_terms=["observational", "retrospective", "secondary", "cohort", "case_control", "cross_sectional"],
+# Strategy 2 – Controlled and free-name (max sensitivity)
+STRATEGY2_OPTS = QueryOptions(
+    data_sources=["ehr", "claims", "realworld", "named"],
+    design_terms=["observational", "retrospective", "secondary", "research_group", "cohort", "longitudinal"],
     proximity_within=None,
+    restrict_english=True,
+    start_year=2010,
+    exclude_clinical_trials=True,
+)
+
+# Strategy 3 – Controlled and free-name (max sensitivity) AND Proximity coupling (≤5 words)
+STRATEGY3_OPTS = QueryOptions(
+    data_sources=["ehr", "claims", "realworld", "named"],
+    design_terms=["observational", "retrospective", "secondary", "research_group", "cohort", "longitudinal"],
+    proximity_within=5,
+    restrict_english=True,
+    start_year=2010,
+    exclude_clinical_trials=True,
+)
+
+# Strategy 4 – Controlled and free-name (max sensitivity) AND Tigher Proximity coupling (≤5 words)
+STRATEGY4_OPTS = QueryOptions(
+    data_sources=["ehr", "claims", "realworld", "named"],
+    design_terms=["observational", "retrospective", "secondary", "research_group"],
+    proximity_within=5,
+    restrict_english=True,
+    start_year=2010,
+    exclude_clinical_trials=True,
+)
+
+# Strategy 5 – High specificity
+STRATEGY5_OPTS = QueryOptions(
+    data_sources=["ehr", "claims", "realworld"],
+    design_terms=["observational", "retrospective", "secondary", "research_group"],
+    proximity_within=None,
+    restrict_english=True,
+    start_year=2010,
+    exclude_clinical_trials=True,
+)
+
+# Strategy 6 – Highest specificity AND Tigher Proximity coupling (≤5 words)
+STRATEGY6_OPTS = QueryOptions(
+    data_sources=["ehr", "claims", "realworld"],
+    design_terms=["observational", "retrospective", "secondary", "research_group"],
+    proximity_within=5,
     restrict_english=True,
     start_year=2010,
     exclude_clinical_trials=True,
