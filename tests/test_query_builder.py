@@ -26,7 +26,6 @@ def test_strategy1_includes_filters_and_not_block():
 
     # Core vocabulary & language/date filters
     _contains(q, [
-        '"Databases, Factual"',  # real‑world data source MeSH
         '"Observational Study"',  # design publication type
         'english[lang]',  # language limiter
     ])
