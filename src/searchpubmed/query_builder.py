@@ -16,118 +16,106 @@ __all__ = [
 # Synonym dictionaries (extensible)
 # ──────────────────────────────────────────────────────────────
 
+# -------------------- data-source terms --------------------
 _DATA_SOURCE_SYNONYMS = {
     "ehr": [
-        '"Electronic Health Records"[MeSH]',
-        '"Medical Records Systems, Computerized"[MeSH]',
-        '"Routinely Collected Health Data"[MeSH]',
-        '"EHR"[TIAB]',
-        '"EMR"[TIAB]',
+        'Electronic Health Records[MeSH]',
+        'Medical Record Systems, Computerized[MeSH]',   # corrected heading
+        '"routinely collected health data"[tiab]',      # not a MeSH term
+        'EHR[TIAB]',
+        'EMR[TIAB]',
         '"electronic health record"[TIAB]',
         '"electronic medical record"[TIAB]',
     ],
     "claims": [
-        '"Insurance Claim Review"[MeSH]',
-        '"Insurance Claim Reporting"[MeSH]',
+        'Insurance Claim Review[MeSH]',
+        'Insurance Claim Reporting[MeSH]',
         '"claims data"[TIAB]',
         '"administrative data"[TIAB]',
         '"insurance claims"[TIAB]',
     ],
     "registry": [
-        '"Registries"[MeSH]',
+        'Registries[MeSH]',
         'registry[TIAB]',
         'registry-based[TIAB]',
     ],
     "realworld": [
-        '"Databases, Factual"[MeSH]',
-        'Real-World Data[TIAB]',
-        'Real-World Evidence[TIAB]',
-        'real-world data[TIAB]',
-        'real-world evidence[TIAB]',
+        'Databases, Factual[MeSH]',
+        '"Real-World Data"[TIAB]',
+        '"Real-World Evidence"[TIAB]',
+        '"real-world data"[TIAB]',
+        '"real-world evidence"[TIAB]',
     ],
     "named": [
-        '"SEER"[TIAB]',
-        '"NHANES"[TIAB]',
-        '"CPRD"[TIAB]',
-        '"MarketScan"[TIAB]',
-        '"Optum"[TIAB]',
-        '"Truven"[TIAB]',
-        '"IQVIA"[TIAB]',
-        '"PharMetrics"[TIAB]',
-        '"Symphony Health"[TIAB]',
-        '"Premier Healthcare"[TIAB]',
-        '"Medicare"[TIAB]',
-        '"Medicaid"[TIAB]',
-        '"All-Payer"[TIAB]',
-        '"All Payer"[TIAB]',
-        '"TriNetX"[TIAB]',
-        '"Cerner"[TIAB]',
-        '"Komodo"[TIAB]',
-        '"Kaiser"[TIAB]',
-        '"Explorys"[TIAB]',
-        '"The Health Improvement Network"[TIAB]',
-        '"Vizient"[TIAB]',
-        '"HealthVerity"[TIAB]',
-        '"Datavant"[TIAB]',
-        '"Merative"[TIAB]',
+        '"SEER"[TIAB]', '"NHANES"[TIAB]', '"CPRD"[TIAB]',
+        '"MarketScan"[TIAB]', '"Optum"[TIAB]', '"Truven"[TIAB]',
+        '"IQVIA"[TIAB]', '"PharMetrics"[TIAB]', '"Symphony Health"[TIAB]',
+        '"Premier Healthcare"[TIAB]', '"Medicare"[TIAB]', '"Medicaid"[TIAB]',
+        '"All-Payer"[TIAB]', '"All Payer"[TIAB]', '"TriNetX"[TIAB]',
+        '"Cerner"[TIAB]', '"Komodo"[TIAB]', '"Kaiser"[TIAB]', '"Explorys"[TIAB]',
+        '"The Health Improvement Network"[TIAB]', '"Vizient"[TIAB]',
+        '"HealthVerity"[TIAB]', '"Datavant"[TIAB]', '"Merative"[TIAB]',
     ],
 }
 
+# -------------------- study-design terms --------------------
 _DESIGN_SYNONYMS = {
     "observational": [
-        '"Observational Study"[PT]',
-        '"Observational Studies as Topic"[MeSH]',
+        'Observational Study[PT]',               # quotes removed
+        'Observational Studies as Topic[MeSH]',
         'observational[TIAB]',
         '"observational study"[TIAB]',
         'observational stud*[TIAB]',
     ],
     "retrospective": [
-        '"Retrospective Studies"[MeSH]',
+        'Retrospective Studies[MeSH]',
         'retrospective[TIAB]',
         '"retrospective study"[TIAB]',
     ],
     "secondary": [
-        '"Secondary Data Analysis"[PT]',
+        'Secondary Data Analysis[PT]',           # quotes removed
         '"secondary analysis"[TIAB]',
         '"secondary data analysis"[TIAB]',
     ],
     "cohort": [
-        '"Cohort Studies"[MeSH]',
+        'Cohort Studies[MeSH]',
         'cohort[TIAB]',
         '"cohort study"[TIAB]',
         'cohort stud*[TIAB]',
     ],
     "case_control": [
-        '"Case-Control Studies"[MeSH]',
+        'Case-Control Studies[MeSH]',
         '"case-control"[TIAB]',
         '"case control"[TIAB]',
     ],
     "cross_sectional": [
-        '"Cross-Sectional Studies"[MeSH]',
+        'Cross-Sectional Studies[MeSH]',
         '"cross-sectional"[TIAB]',
         '"cross sectional"[TIAB]',
     ],
     "research_group": [
-        '"Health Services Research"[MeSH]',
-        '"Outcome Assessment, Health Care"[MeSH]',
-        '"Comparative Effectiveness Research"[MeSH]',
+        'Health Services Research[MeSH]',
+        'Outcome Assessment, Health Care[MeSH]',
+        'Comparative Effectiveness Research[MeSH]',
     ],
     "prospective": [
-        '"Prospective Studies"[MeSH]',
+        'Prospective Studies[MeSH]',
         'prospective[TIAB]',
     ],
     "longitudinal": [
-        '"Longitudinal Studies"[MeSH]',
+        'Longitudinal Studies[MeSH]',
         '"longitudinal study"[TIAB]',
     ],
 }
 
+# -------------------- exclusion terms --------------------
 _EXCLUDE_CT_TERMS = (
-    '"Clinical Trials as Topic"[MeSH]',
-    '"Controlled Clinical Trials as Topic"[MeSH]',
-    '"Randomized Controlled Trial"[PT]',
-    '"Clinical Trial"[PT]',
+    'Clinical Trials as Topic[MeSH]',
+    'Controlled Clinical Trials as Topic[MeSH]',
+    'Randomized Controlled Trial[PT]',
+    'Clinical Trial[PT]',
 )
+
 
 # ──────────────────────────────────────────────────────────────
 # Public dataclass of options
