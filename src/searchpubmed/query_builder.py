@@ -38,7 +38,7 @@ _DATA_SOURCE_SYNONYMS = {
     "ehr": [
         '"Electronic Health Records"[MeSH]',
         '"Medical Records Systems, Computerized"[MeSH]',
-        "'Routinely Collected Health Data"[MeSH]',
+        '"Routinely Collected Health Data"[MeSH]',
         '"EHR"[TIAB]',
         '"EMR"[TIAB]',
         '"electronic health record"[TIAB]',
