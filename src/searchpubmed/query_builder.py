@@ -20,8 +20,8 @@ __all__ = [
 _DATA_SOURCE_SYNONYMS = {
     "ehr": [
         'Electronic Health Records[MeSH]',
-        'Medical Record Systems, Computerized[MeSH]',   # corrected heading
-        '"routinely collected health data"[tiab]',      # not a MeSH term
+        'Medical Record Systems, Computerized[MeSH]',
+        '"routinely collected health data"[MeSH]',
         'EHR[TIAB]',
         'EMR[TIAB]',
         '"electronic health record"[TIAB]',
