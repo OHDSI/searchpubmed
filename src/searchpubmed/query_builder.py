@@ -148,7 +148,7 @@ _EXCLUDE_CT_TERMS = (
     '"Clinical Trial"[PT]'
 )
 
-_EXCLUDE_GENOME_TERMS = (,
+_EXCLUDE_GENOME_TERMS = (
     'genomic[TIAB]',
     'genome[TIAB]',
     '"Exome Sequencing"[MeSH]',

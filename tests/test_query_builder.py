@@ -2,7 +2,7 @@ import re
 import pytest
 from searchpubmed.query_builder import (
     build_query, STRATEGY1_OPTS, STRATEGY2_OPTS, STRATEGY3_OPTS,
-    STRATEGY4_OPTS, STRATEGY5_OPTS, QueryOptions
+    STRATEGY4_OPTS, STRATEGY5_OPTS, STRATEGY6_OPTS, QueryOptions
 )
 
 def _contains(q, pieces):
