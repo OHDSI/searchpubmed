@@ -1,5 +1,5 @@
-"""
-searchpubmed
+from __future__ import annotations
+"""searchpubmed
 ============
 
 A lightweight helper-library for:
@@ -8,12 +8,14 @@ A lightweight helper-library for:
 * pulling PubMed metadata (EFetch),
 * downloading full-text JATS XML & HTML from PMC,
 * and stitching everything into a single DataFrame.
-
 """
 
-from __future__ import annotations
+# ---------------------------------------------------------------------------
+# Public re-export list
+# ---------------------------------------------------------------------------
 
 __all__: list[str] = [
+    # core pubmed helpers
     "get_pubmed_metadata_pmid",
     "get_pubmed_metadata_pmcid",
     "map_pmids_to_pmcids",
@@ -21,10 +23,23 @@ __all__: list[str] = [
     "get_pmc_html_text",
     "get_pmc_full_text",
     "fetch_pubmed_fulltexts",
+    # query-builder surface
+    "QueryOptions",
+    "build_query",
+    "STRATEGY1_OPTS",
+    "STRATEGY2_OPTS",
+    "STRATEGY3_OPTS",
+    "STRATEGY4_OPTS",
+    "STRATEGY5_OPTS",
+    # package meta
     "__version__",
 ]
 
 __version__: str = "0.1.0"
+
+# ---------------------------------------------------------------------------
+# Core PubMed functionality (unchanged)
+# ---------------------------------------------------------------------------
 
 from .pubmed import (
     fetch_pubmed_fulltexts,
@@ -36,3 +51,16 @@ from .pubmed import (
     map_pmids_to_pmcids,
 )
 
+# ---------------------------------------------------------------------------
+# Query-builder re-exports (minimal wiring)
+# ---------------------------------------------------------------------------
+
+from .query_builder import (
+    QueryOptions,
+    build_query,
+    STRATEGY1_OPTS,
+    STRATEGY2_OPTS,
+    STRATEGY3_OPTS,
+    STRATEGY4_OPTS,
+    STRATEGY5_OPTS,
+)
