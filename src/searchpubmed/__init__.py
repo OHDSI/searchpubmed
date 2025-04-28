@@ -44,6 +44,7 @@ from .query_builder import (
 # ---------------------------------------------------------------------------
 __all__: list[str] = [
     # PubMed helpers
+    "get_pmid_from_pubmed",  
     "get_pubmed_metadata_pmid",
     "get_pubmed_metadata_pmcid",
     "map_pmids_to_pmcids",
@@ -59,6 +60,12 @@ __all__: list[str] = [
     "STRATEGY3_OPTS",
     "STRATEGY4_OPTS",
     "STRATEGY5_OPTS",
+    # (optional) expose frozen strings
+    "STRATEGY1_QUERY", 
+    "STRATEGY2_QUERY", 
+    "STRATEGY3_QUERY",
+    "STRATEGY4_QUERY", 
+    "STRATEGY5_QUERY",
     # Meta
     "__version__",
 ]
