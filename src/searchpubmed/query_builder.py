@@ -87,7 +87,7 @@ _DATA_SOURCE_SYNONYMS = {
         '"Vizient"[TIAB]',
         '"HealthVerity"[TIAB]',
         '"Datavant"[TIAB]',
-        '"Merativ"[TIAB]',
+        '"Merative"[TIAB]',
     ],
 }
 
