@@ -37,6 +37,7 @@ from .query_builder import (
     STRATEGY3_OPTS,
     STRATEGY4_OPTS,
     STRATEGY5_OPTS,
+    STRATEGY6_OPTS,
 )
 
 # ---------------------------------------------------------------------------
@@ -60,12 +61,7 @@ __all__: list[str] = [
     "STRATEGY3_OPTS",
     "STRATEGY4_OPTS",
     "STRATEGY5_OPTS",
-    # (optional) expose frozen strings
-    "STRATEGY1_QUERY", 
-    "STRATEGY2_QUERY", 
-    "STRATEGY3_QUERY",
-    "STRATEGY4_QUERY", 
-    "STRATEGY5_QUERY",
+    "STRATEGY6_OPTS",
     # Meta
     "__version__",
 ]
