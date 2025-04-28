@@ -61,7 +61,7 @@ _DATA_SOURCE_SYNONYMS = {
 # -------------------- study-design terms --------------------
 _DESIGN_SYNONYMS = {
     "observational": [
-        'Observational Study[PT]',               # quotes removed
+        'Observational Study[PT]',    
         'Observational Studies as Topic[MeSH]',
         'observational[TIAB]',
         '"observational study"[TIAB]',
@@ -73,7 +73,7 @@ _DESIGN_SYNONYMS = {
         '"retrospective study"[TIAB]',
     ],
     "secondary": [
-        'Secondary Data Analysis[PT]',           # quotes removed
+        'Secondary Data Analysis[MeSH]',
         '"secondary analysis"[TIAB]',
         '"secondary data analysis"[TIAB]',
     ],
