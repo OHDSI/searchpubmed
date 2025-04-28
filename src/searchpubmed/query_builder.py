@@ -197,7 +197,59 @@ def build_query(opts: QueryOptions) -> str:
 # Ready‑made Boolean strings (frozen)
 # ──────────────────────────────────────────────────────────────
 
-# … (unchanged STRATEGY*_QUERY constants remain here) …
+STRATEGY1_QUERY = (
+    '(("Databases, Factual"[MeSH] OR "Electronic Health Records"[MeSH] OR '
+    '"Registries"[MeSH] OR "Real-World Data"[MeSH] OR "Real-World Evidence"[MeSH]) '
+    'AND ("Observational Study"[PT] OR "Retrospective Studies"[MeSH] OR '
+    '"Secondary Analysis"[PT])) AND english[lang] AND ("2010"[dp] : "3000"[dp])'
+)
+
+STRATEGY2_QUERY = (
+    '(( "Databases, Factual"[MeSH] OR "Electronic Health Records"[MeSH] OR '
+    '"Medical Records Systems, Computerized"[MeSH] OR "Registries"[MeSH] OR '
+    '"EHR"[TIAB] OR "EMR"[TIAB] OR "electronic health record"[TIAB] OR '
+    '"electronic medical record"[TIAB] OR "claims data"[TIAB] OR '
+    '"administrative data"[TIAB] OR "insurance claims"[TIAB] OR registry[TIAB] '
+    'OR database[TIAB]) AND ("Observational Study"[PT] OR observational[TIAB] OR '
+    '"Retrospective Studies"[MeSH] OR retrospective[TIAB] OR '
+    '"Secondary Analysis"[PT] OR "secondary analysis"[TIAB])) '
+    'AND english[lang] AND ("2010"[dp] : "3000"[dp])'
+)
+
+STRATEGY3_QUERY = (
+    '("observational" 5 "EHR"[TIAB] OR "observational" 5 "EMR"[TIAB] OR '
+    '"observational" 5 "claims data"[TIAB] OR "observational" 5 "registry"[TIAB] OR '
+    '"retrospective" 5 "EHR"[TIAB] OR "retrospective" 5 "EMR"[TIAB] OR '
+    '"retrospective" 5 "claims data"[TIAB] OR "retrospective" 5 "registry"[TIAB] OR '
+    '"secondary analysis" 5 "claims data"[TIAB] OR "secondary analysis" 5 "EHR"[TIAB]) '
+    'AND english[lang] AND ("2010"[dp] : "3000"[dp])'
+)
+
+STRATEGY4_QUERY = (
+    '((( "Electronic Health Records"[MeSH] OR "Databases, Factual"[MeSH] OR '
+    '"Registries"[MeSH] OR "Medical Records Systems, Computerized"[MeSH] OR '
+    '"claims data"[TIAB] OR "administrative data"[TIAB] OR registry[TIAB] OR database[TIAB]) '
+    'AND ("Observational Study"[PT] OR "Retrospective Studies"[MeSH] OR '
+    'observational[TIAB] OR retrospective[TIAB] OR "Secondary Analysis"[TIAB])) '
+    'OR ("SEER"[TIAB] OR "NHANES"[TIAB] OR "CPRD"[TIAB] OR "MarketScan"[TIAB] '
+    'OR "Optum"[TIAB] OR "Truven"[TIAB] OR "IQVIA"[TIAB])) '
+    'AND english[lang] AND ("2010"[dp] : "3000"[dp]) '
+    'NOT ("Randomized Controlled Trial"[PT] OR "Clinical Trial"[PT] OR '
+    '"Systematic Review"[PT] OR "Meta-Analysis"[PT] OR genomic[TIAB] OR genome[TIAB])'
+)
+
+STRATEGY5_QUERY = (
+    '(("Databases, Factual"[MeSH] OR "Electronic Health Records"[MeSH] OR '
+    '"Medical Records Systems, Computerized"[MeSH] OR "Registries"[MeSH] OR '
+    '"Insurance Claim Review"[MeSH]) AND ("Observational Study"[PT] OR '
+    '"Retrospective Studies"[MeSH] OR "Cohort Studies"[MeSH] OR '
+    '"Case-Control Studies"[MeSH] OR "Cross-Sectional Studies"[MeSH] OR '
+    '"Secondary Analysis"[TIAB])) AND english[lang] AND ("2010"[dp] : "3000"[dp]) '
+    'NOT ("Randomized Controlled Trial"[PT] OR "Clinical Trial"[PT] OR '
+    '"Systematic Review"[PT] OR "Meta-Analysis"[PT] OR "Review"[PT] OR '
+    '"Comment"[PT] OR "Letter"[PT] OR "Editorial"[PT] OR (animals[mh] NOT humans[mh]) '
+    'OR genomic[TIAB] OR genome[TIAB] OR "Genome-Wide Association Study"[MeSH])'
+)
 
 # ──────────────────────────────────────────────────────────────
 # Five canned QueryOptions presets
