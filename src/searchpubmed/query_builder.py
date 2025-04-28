@@ -171,25 +171,31 @@ def build_query(opts: QueryOptions) -> str:
     design = opts._lookup(opts.design_terms, _DESIGN_SYNONYMS)
     source = opts._lookup(opts.data_sources, _DATA_SOURCE_SYNONYMS)
 
+    # core concept(s)
     if opts.proximity_within is not None:
         prox_parts = _apply_proximity(design, source, opts.proximity_within)
         core = f"({' OR '.join(prox_parts)})"
     else:
         core = f"(({' OR '.join(source)}) AND ({' OR '.join(design)}))"
 
-    filters: List[str] = []
+    # optional filters
+    parts: List[str] = [core]
+
     if opts.restrict_english:
-        filters.append("english[lang]")
+        parts.append("english[lang]")
 
     if opts.start_year or opts.end_year:
         s = str(opts.start_year or 1800)
         e = str(opts.end_year or 3000)
-        filters.append(f'("{s}"[dp] : "{e}"[dp])')
+        parts.append(f'("{s}"[dp] : "{e}"[dp])')
 
     if opts.exclude_clinical_trials:
-        filters.append("NOT (" + " OR ".join(_EXCLUDE_CT_TERMS) + ")")
+        parts.append("NOT (" + " OR ".join(_EXCLUDE_CT_TERMS) + ")")
 
-    return " AND ".join([core] + filters)
+    # PubMed treats whitespace as an implicit AND, so no explicit “AND NOT” appears
+    return " ".join(parts)
+
+
 
 # ──────────────────────────────────────────────────────────────
 # Strategy presets – identical semantics to upstream
