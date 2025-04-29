@@ -524,7 +524,7 @@ def get_pubmed_metadata_pmcid(
         chunk = unique_ids[idx * batch_size:(idx + 1) * batch_size]
         params = {
             "db": "pmc",
-            "id": ",".join(cid.lstrip("PMC") for cid in chunk),  # PMC API wants bare integers
+            "id": ",".join(cid.removeprefix("PMC") for cid in chunk),
             "retmode": "xml",
         }
         if api_key:
@@ -575,7 +575,16 @@ def get_pubmed_metadata_pmcid(
 
         # ── Extract per-article metadata ──────────────────────
         for art in root.findall(".//article"):
-            pmcid = art.findtext('.//article-id[@pub-id-type="pmcid"]', default="N/A")
+            pmcid = next(
+                (art.findtext(f'.//article-id[@pub-id-type="{t}"]')
+                 for t in ("pmcid", "pmc", "pmcid-ver", "pmcaid")
+                 if art.find(f'.//article-id[@pub-id-type="{t}"]') is not None),
+                "N/A",
+            )
+            if pmcid and "." in pmcid:
+                pmcid = pmcid.split(".", 1)[0]
+            if pmcid and not pmcid.upper().startswith("PMC"):
+                pmcid = f"PMC{pmcid}"
             pmid  = art.findtext('.//article-id[@pub-id-type="pmid"]', default="N/A")
             title = (art.findtext(".//article-title", default="N/A") or "").strip()
 
@@ -712,8 +721,11 @@ def get_pmc_full_xml(
     if not pmcids:
         return pd.DataFrame(columns=["pmcid", "fullXML"]).astype("string")
 
-    # Normalise IDs → keep “PMC” prefix for fetching & output
-    norm_ids = [pid if str(pid).upper().startswith("PMC") else f"PMC{pid}" for pid in pmcids]
+    # --- Prefix-safe normalisation ----------------------------------
+    norm_ids = [
+        pid if str(pid).upper().startswith("PMC") else f"PMC{pid}"
+        for pid in pmcids
+    ]
 
     base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
     session = requests.Session()
