@@ -575,7 +575,15 @@ def get_pubmed_metadata_pmcid(
 
         # ── Extract per-article metadata ──────────────────────
         for art in root.findall(".//article"):
-            pmcid = art.findtext('.//article-id[@pub-id-type="pmcid"]', default="N/A")
+            pmcid = (
+                art.findtext('.//article-id[@pub-id-type="pmcid"]')
+                or art.findtext('.//article-id[@pub-id-type="pmc"]')
+                or art.findtext('.//article-id[@pub-id-type="pmcid-ver"]')
+                or art.findtext('.//article-id[@pub-id-type="pmcaid"]')
+                or "N/A"
+            )
+            if pmcid != "N/A" and not pmcid.upper().startswith("PMC"):
+                pmcid = f"PMC{pmcid}"
             pmid  = art.findtext('.//article-id[@pub-id-type="pmid"]', default="N/A")
             title = (art.findtext(".//article-title", default="N/A") or "").strip()
 
