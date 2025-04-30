@@ -893,7 +893,17 @@ def get_pmc_html_text(
     if not pmcids:
         return pd.DataFrame(columns=["pmcid", "htmlText", "scrapeMsg"]).astype("string")
 
-    norm_ids = [pid if str(pid).upper().startswith("PMC") else f"PMC{pid}" for pid in pmcids]
+    # Preserve the IDs exactly as the caller gave them  ➜ `orig`
+    # Canonicalise just for the network call            ➜ `canon`
+    canon_ids: list[str] = []
+    canon_to_orig: dict[str, str] = {}
+    seen: set[str] = set()
+    for orig in pmcids:
+        canon = orig if str(orig).upper().startswith("PMC") else f"PMC{orig}"
+        if canon not in seen:               # <── ensures we fetch each article once
+            canon_ids.append(canon)
+            seen.add(canon)
+        canon_to_orig.setdefault(canon, orig)   # first occurrence wins
     records = []
 
     base_tpl = "https://pmc.ncbi.nlm.nih.gov/articles/{pid}/?format=flat"
@@ -905,7 +915,7 @@ def get_pmc_html_text(
     }
 
     # ── Main loop over individual IDs ───────────────────────────
-    for pid in norm_ids:
+    for pid in canon_ids:               # use canonical value for the URL
         url = base_tpl.format(pid=pid)
         html_text: str | None = None
         msg = ""
@@ -950,11 +960,12 @@ def get_pmc_html_text(
                 # avoid flooding PMC with rapid requests
                 time.sleep(0.1)
 
+        # map back to the exact value supplied by the caller
         records.append({
-            "pmcid": pid,
+            "pmcid": canon_to_orig.get(pid, pid),
             "htmlText": html_text or "N/A",
             "scrapeMsg": msg,
-        })
+         })
 
     return pd.DataFrame(records).astype("string")
     
