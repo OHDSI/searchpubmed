@@ -832,8 +832,8 @@ def get_pmc_full_xml(
                 {
                     "pmcid": cid,
                     "fullXML": "N/A",
-                    "isFullText": False,
-                    "hasSuppMat": False,
+                    "isFullText": pd.NA,
+                    "hasSuppMat": pd.NA,
                 }
                 )
 
