@@ -24,6 +24,7 @@ from .pubmed import (
     get_pubmed_metadata_pmid,
     get_pubmed_metadata_pmcid,
     map_pmids_to_pmcids,
+    get_pmc_licenses
 )
 
 # ---------------------------------------------------------------------------
@@ -49,6 +50,7 @@ __all__: list[str] = [
     "get_pubmed_metadata_pmid",
     "get_pubmed_metadata_pmcid",
     "map_pmids_to_pmcids",
+    "get_pmc_licenses",
     "get_pmc_full_xml",
     "get_pmc_html_text",
     "get_pmc_full_text",
