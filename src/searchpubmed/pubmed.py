@@ -915,7 +915,7 @@ def get_pmc_full_xml(
 
         time.sleep(delay)
         
-    pd['fullText'] = pd['fullXML'].apply(extract_full_text_from_xml)       
+    df['fullText'] = df['fullXML'].apply(extract_full_text_from_xml)       
 
     # ── Final DataFrame with enforced dtypes ──────────────────
     return pd.DataFrame(records).astype(
