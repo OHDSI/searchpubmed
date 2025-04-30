@@ -254,12 +254,12 @@ def _fake_get(url, *, params, timeout, headers):
     return fake
 
 from unittest.mock import patch
-def test_fetch_pmc_licenses_basic():
+def test_get_pmc_licenses_basic():
     pmcids = ["5334499", "PMC10167591", "PMC9999999"]   # mix bare + prefixed
 
     # Patch `requests.get` only inside this `with` block
     with patch("requests.get", side_effect=_fake_get):
-        licences = fetch_pmc_licenses(pmcids)
+        licences = get_pmc_licenses(pmcids)
 
     # Normalisation: every key should carry the 'PMC' prefix
     assert set(licences) == {"PMC5334499", "PMC10167591", "PMC9999999"}
