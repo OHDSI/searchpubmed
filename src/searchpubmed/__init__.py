@@ -17,7 +17,6 @@ __version__: str = "0.1.0"
 # Core PubMed functionality
 # ---------------------------------------------------------------------------
 from .pubmed import (
-    fetch_pubmed_fulltexts,
     get_pmc_full_text,
     get_pmc_full_xml,
     get_pmc_html_text,
@@ -54,7 +53,6 @@ __all__: list[str] = [
     "get_pmc_full_xml",
     "get_pmc_html_text",
     "get_pmc_full_text",
-    "fetch_pubmed_fulltexts",
     # Query-builder helpers
     "QueryOptions",
     "build_query",

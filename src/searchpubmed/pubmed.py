@@ -695,6 +695,29 @@ def _strip_default_ns(xml_bytes: bytes) -> bytes:
     returned XML is easy to address with bare tag names.
     """
     return re.sub(rb'\sxmlns="[^"]+"', b"", xml_bytes, count=1)
+    
+    
+# ──────────────────────────────────────────────────────────────
+#  Internal helper: classifies an XML payload as
+#  'medline', 'pmc', or 'unknown' in O(1) time.
+# ──────────────────────────────────────────────────────────────
+def _classify_pubmed_xml(xml_str: str) -> str:
+    """
+    Very fast heuristic:
+        • <article …>            → 'pmc'   (JATS full-text from PMC)
+        • <PubmedArticle…> /     → 'medline' (MEDLINE/PubMed citation)
+          <MedlineCitation…>
+        • anything else          → 'unknown'
+    """
+    if not xml_str or xml_str == "N/A":
+        return "unknown"
+    sniff = xml_str.lstrip()[:72].lower()      # cheap prefix check
+    if sniff.startswith("<article"):
+        return "pmc"
+    if "<medlinecitation" in sniff or "<pubmedarticle" in sniff:
+        return "medline"
+    return "unknown"
+
 
 def get_pmc_full_xml(
     pmcids: List[str],
@@ -721,7 +744,7 @@ def get_pmc_full_xml(
     timeout : int, default 20 s
         Socket timeout for each HTTP request.
     max_retries : int, default 3
-        Attempts per batch on HTTP 429 or 5xx before giving up.
+        Attempts per batch on HTTP-429 / 5xx before giving up.
     delay : float, default 0.34 s
         Base pause between retries (doubles each attempt).
 
@@ -729,27 +752,39 @@ def get_pmc_full_xml(
     -------
     pandas.DataFrame
         Columns
-        --------
-        pmcid       | string  
-        fullXML     | string  (entire `<article>` subtree or "N/A")
-        isFullText  | boolean (True ⇢ a <body> element exists)
-        hasSuppMat  | boolean (True ⇢ supplementary material present)
+        -------
+        pmcid       | string   (canonical “PMC…” identifier)
+        fullXML     | string   (entire `<article>` subtree or "N/A")
+        isFullText  | boolean  (True ⇢ a <body> element exists)
+        hasSuppMat  | boolean  (True ⇢ supplementary material present)
+        xmlKind     | string   ("pmc", "medline", or "unknown")
 
         Every PMC ID you supplied is represented exactly once—even if the
         record is missing, withdrawn, or the request fails.
     """
-    # ── Guard clause ────────────────────────────────────────────
+    # ── Guard clause ───────────────────────────────────────────
     if not pmcids:
-        return (pd.DataFrame(
-            columns=["pmcid", "fullXML", "isFullText", "hasSuppMat"]
-        ).astype({
-            "pmcid":      "string",
-            "fullXML":    "string",
-            "isFullText": "boolean",
-            "hasSuppMat": "boolean",
-        }))
+        return (
+            pd.DataFrame(
+                columns=[
+                    "pmcid",
+                    "fullXML",
+                    "isFullText",
+                    "hasSuppMat",
+                    "xmlKind",
+                ]
+            ).astype(
+                {
+                    "pmcid": "string",
+                    "fullXML": "string",
+                    "isFullText": "boolean",
+                    "hasSuppMat": "boolean",
+                    "xmlKind": "string",
+                }
+            )
+        )
 
-    # --- Prefix-safe normalisation ----------------------------------
+    # --- Prefix-safe normalisation ----------------------------
     norm_ids = [
         pid if str(pid).upper().startswith("PMC") else f"PMC{pid}"
         for pid in pmcids
@@ -761,14 +796,14 @@ def get_pmc_full_xml(
 
     total_batches = ceil(len(norm_ids) / batch_size)
 
-    # ── Main loop ───────────────────────────────────────────────
+    # ── Main loop ─────────────────────────────────────────────
     for b_idx in range(total_batches):
-        chunk = norm_ids[b_idx * batch_size:(b_idx + 1) * batch_size]
+        chunk = norm_ids[b_idx * batch_size : (b_idx + 1) * batch_size]
         params = {"db": "pmc", "retmode": "xml", "id": ",".join(chunk)}
         if api_key:
             params["api_key"] = api_key
 
-        # ── Fetch with retries ────────────────────────────────────
+        # ── Fetch with retries ────────────────────────────────
         response = None
         for attempt in range(1, max_retries + 1):
             try:
@@ -777,95 +812,119 @@ def get_pmc_full_xml(
                 break
             except (HTTPError, RequestException) as exc:
                 status = getattr(exc.response, "status_code", None)
-                if status and (status == 429 or 500 <= status < 600) and attempt < max_retries:
+                if (
+                    status
+                    and (status == 429 or 500 <= status < 600)
+                    and attempt < max_retries
+                ):
                     wait = delay * (2 ** (attempt - 1))
                     logger.warning(
-                        f"Batch {b_idx+1}: HTTP {status}; retry {attempt}/{max_retries} in {wait:.1f}s"
+                        f"Batch {b_idx+1}: HTTP {status}; retry "
+                        f"{attempt}/{max_retries} in {wait:.1f}s"
                     )
                     time.sleep(wait)
                     continue
                 logger.error(f"Batch {b_idx+1} failed: {exc}")
                 break
 
-        # ── On complete failure, emit placeholders and continue ────
+        # ── On complete failure, emit placeholders ────────────
         if response is None or not response.ok:
-            records.extend({
-                "pmcid":     cid,
-                "fullXML":   "N/A",
-                "isFullText": False,
-                "hasSuppMat": False,
-            } for cid in chunk)
+            records.extend(
+                {
+                    "pmcid": cid,
+                    "fullXML": "N/A",
+                    "isFullText": False,
+                    "hasSuppMat": False,
+                    "xmlKind": "unknown",
+                }
+                for cid in chunk
+            )
             continue
 
-        # ── Parse / strip namespace ─────────────────────────────
+        # ── Parse / strip namespace ───────────────────────────
         try:
             root = ET.fromstring(_strip_default_ns(response.content))
         except ET.ParseError as e:
             logger.error(f"XML parse error in batch {b_idx+1}: {e}")
-            records.extend({
-                "pmcid":     cid,
-                "fullXML":   "N/A",
-                "isFullText": False,
-                "hasSuppMat": False,
-            } for cid in chunk)
+            records.extend(
+                {
+                    "pmcid": cid,
+                    "fullXML": "N/A",
+                    "isFullText": False,
+                    "hasSuppMat": False,
+                    "xmlKind": "unknown",
+                }
+                for cid in chunk
+            )
             time.sleep(delay)
             continue
 
-        # ── Extract <article> records ───────────────────────────
-        seen = set()
+        # ── Extract <article> records ─────────────────────────
+        seen: set[str] = set()
         for art in root.findall(".//article"):
             # Robust PMCID extraction & normalisation
             pmcid_text = next(
                 (
                     art.findtext(f'.//article-id[@pub-id-type="{t}"]')
                     for t in ("pmcid", "pmc", "pmcid-ver", "pmcaid")
-                    if art.find(f'.//article-id[@pub-id-type="{t}"]') is not None
+                    if art.find(f'.//article-id[@pub-id-type="{t}"]')
+                    is not None
                 ),
                 "N/A",
             )
-            # Drop version suffixes, enforce "PMC" prefix
-            if "." in pmcid_text:
+            if "." in pmcid_text:  # drop version suffix
                 pmcid_text = pmcid_text.split(".", 1)[0]
             if not pmcid_text.upper().startswith("PMC"):
                 pmcid_text = f"PMC{pmcid_text}"
 
-            xml_str  = ET.tostring(art, encoding="unicode")
+            xml_str = ET.tostring(art, encoding="unicode")
             has_body = art.find(".//body") is not None
             has_supp = any(
-                art.find(path) is not None for path in (
+                art.find(path) is not None
+                for path in (
                     ".//supplementary-material",
                     ".//inline-supplementary-material",
                     ".//sub-article[@article-type='supplementary-material']",
                 )
             )
 
-            records.append({
-                "pmcid":      pmcid_text,
-                "fullXML":    xml_str,
-                "isFullText": has_body,
-                "hasSuppMat": has_supp,
-            })
+            records.append(
+                {
+                    "pmcid": pmcid_text,
+                    "fullXML": xml_str,
+                    "isFullText": has_body,
+                    "hasSuppMat": has_supp,
+                    "xmlKind": _classify_pubmed_xml(xml_str),
+                }
+            )
             seen.add(pmcid_text)
 
-        # ── Placeholder rows for any IDs not returned ────────────
+        # ── Placeholder rows for IDs not returned ─────────────
         for cid in chunk:
             if cid not in seen:
-                records.append({
-                    "pmcid":      cid,
-                    "fullXML":    "N/A",
-                    "isFullText": pd.NA,
-                    "hasSuppMat": pd.NA,
-                })
+                records.append(
+                    {
+                        "pmcid": cid,
+                        "fullXML": "N/A",
+                        "isFullText": pd.NA,
+                        "hasSuppMat": pd.NA,
+                        "xmlKind": "unknown",
+                    }
+                )
 
         time.sleep(delay)
 
-    # ── Final DataFrame with enforced dtypes ───────────────────
-    return pd.DataFrame(records).astype({
-        "pmcid":      "string",
-        "fullXML":    "string",
-        "isFullText": "boolean",
-        "hasSuppMat": "boolean",
-    })
+    # ── Final DataFrame with enforced dtypes ──────────────────
+    return pd.DataFrame(records).astype(
+        {
+            "pmcid": "string",
+            "fullXML": "string",
+            "isFullText": "boolean",
+            "hasSuppMat": "boolean",
+            "xmlKind": "string",
+        }
+    )
+
 
 
 
@@ -1094,160 +1153,6 @@ def _scrape_pmc_standard_html(pmcid: str, *, timeout: int = 20) -> str:
     except Exception as exc:
         logger.warning(f"{pmcid}: standard HTML scrape failed – {exc}")
         return "N/A"
-
-
-##############################################################################
-#  Main workflow                                                             #
-##############################################################################
-def fetch_pubmed_fulltexts(
-    query: str,
-    *,
-    api_key: str | None = None,
-    retmax: int = 2_000,
-    min_fulltext_chars: int = 2_000,
-    batch_size: int = 200,
-    timeout: int = 20,
-    max_retries: int = 3,
-    delay: float = 0.34,
-) -> pd.DataFrame:
-    """
-    ------------------------------------------------------------------------
-    End-to-end helper that:
-      1. Searches PubMed (`get_pmid_from_pubmed`),
-      2. Maps PMIDs → PMCIDs (`map_pmids_to_pmcids`),
-      3. Gets PubMed-level metadata (`get_pubmed_metadata_pmid`),
-      4. Gets PMC-level metadata (`get_pubmed_metadata_pmcid`) and
-         suffixes overlapping columns with “_pmcid”,
-      5. Downloads full-text XML + flat-HTML from PMC,
-      6. Merges everything into one tidy, string-typed DataFrame.
-    ------------------------------------------------------------------------
-    The column order in the final frame is:
-        [pmid] + PubMed-meta + [pmcid] + PMC-meta(_pmcid) + text columns
-    """
-
-    pmids = get_pmid_from_pubmed(query,
-                                 retmax=retmax,
-                                 api_key=api_key,
-                                 timeout=timeout,
-                                 max_retries=max_retries,
-                                 delay=delay)
-    if not pmids:
-        logger.warning("No PMIDs returned – exiting early")
-        return pd.DataFrame().astype("string")
-
-    # ── how many unique PMIDs did we get? ────────────────────────────────
-    n_unique = len(set(pmids))
-    logger.info("ESearch returned %d unique PMIDs for %r", n_unique, query)
-
-    pmid_pmcid = map_pmids_to_pmcids(pmids,
-                                     api_key=api_key,
-                                     batch_size=batch_size,
-                                     timeout=timeout,
-                                     max_retries=max_retries,
-                                     delay=delay)  # columns: pmid, pmcid
-
-    meta_df = get_pubmed_metadata_pmid(pmids,
-                                       api_key=api_key,
-                                       batch_size=batch_size,
-                                       timeout=timeout,
-                                       max_retries=max_retries,
-                                       delay=delay)  # key = pmid
-
-    # ── 4) PMC‐level metadata ───────────────────────────────────────────────
-
-    pmcids = pmid_pmcid["pmcid"].dropna().unique().tolist()
-    pmc_meta_df = get_pubmed_metadata_pmcid(
-        pmcids,
-        api_key=api_key,
-        batch_size=batch_size,
-        timeout=timeout,
-        max_retries=max_retries,
-        delay=delay)  # key = pmid and pmcid
-
-    # rename every column except the two keys
-    pmc_meta_df = pmc_meta_df.rename(
-        columns=lambda c: f"{c}_pmcid" if c not in {"pmid", "pmcid"} else c)
-
-    # ── 5) Full texts (XML + flat HTML) ────────────────────────────────────
-
-    xml_df = (
-        get_pmc_full_xml(
-            pmcids,
-            api_key=api_key,
-            batch_size=batch_size,
-            timeout=timeout,
-            max_retries=max_retries,
-            delay=delay).rename(columns={
-                "fullXML": "xmlText"
-            }).drop_duplicates(subset="pmcid",
-                               keep="first")  # ⬅️ one row per pmcid
-    )
-
-    flat_df = (
-        get_pmc_html_text(pmcids,
-                          timeout=timeout,
-                          max_retries=max_retries,
-                          delay=delay).rename(columns={
-                              "htmlText": "flatHtmlText",
-                              "scrapeMsg": "flatHtmlMsg"
-                          }).drop_duplicates(subset="pmcid",
-                                             keep="first")  # ⬅️ same idea
-    )
-
-    # ── 6) Assemble & return ───────────────────────────────────────────────
-    logger.info("Step 6/6: Final merge 1")
-    # join XML + HTML on pmcid
-    # 1) bring in the JATS XML
-    pmcid_text = pmid_pmcid.merge(
-        xml_df,  # ← fullXML column lives here
-        on="pmcid",
-        how="left")
-
-    # 2) add the flat HTML
-    pmcid_texts = pmcid_text.merge(
-        flat_df,  # ← htmlText & scrapeMsg columns
-        on="pmcid",
-        how="left")
-
-    # final “wide” join: pmid_pmcid brings in pmid & pmcid, so the two-key merge works
-
-    # 1️⃣  Add PubMed-level metadata
-    wide_1 = pmid_pmcid.merge(
-        meta_df,  # PubMed metadata
-        on="pmid",
-        how="left")
-
-    # 2️⃣  Bring in full-text (PMC) records
-    wide_2 = wide_1.merge(
-        pmcid_texts,  # PMC full-text and derived fields
-        on=["pmcid", "pmid"],
-        how="left")
-
-    # 3️⃣  Attach extra PMC-level metadata
-    wide_3 = wide_2.merge(
-        pmc_meta_df,  # “pmcid • pmid” keyed table
-        on=["pmcid", "pmid"],
-        how="left")
-
-    bool_cols = wide_3.select_dtypes(include="boolean").columns
-    if len(bool_cols):
-        wide_3[bool_cols] = wide_3[bool_cols].astype(
-            object)  # or .astype("string")
-
-    # 4️⃣  Standardise missing values
-    wide = wide_3.fillna("N/A")
-
-    # Column order: PMID-block | PMCID-block | texts
-    pubmed_cols = [c for c in meta_df.columns if c != "pmid"]
-    pmcid_meta_cols = [
-        c for c in pmc_meta_df.columns if c not in ("pmcid", "pmid")
-    ]
-    text_cols = ["xmlText", "flatHtmlText", "flatHtmlMsg"]
-
-    ordered = ["pmid", "pmcid"] + pubmed_cols + pmcid_meta_cols + text_cols
-
-    logger.info("Done – returning %d rows", len(wide))
-    return wide.loc[:, ordered].astype("string")
 
 
 def get_pmc_licenses(pmcids: Iterable[str],
