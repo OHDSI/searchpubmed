@@ -6,14 +6,15 @@ from __future__ import annotations
 import logging, sys
 
 logging.basicConfig(
-    level=logging.INFO,                    # allow INFO and above
-    stream=sys.stdout,                     # send to notebook output
+    level=logging.INFO,  # allow INFO and above
+    stream=sys.stdout,  # send to notebook output
     format="%(asctime)s %(levelname)s %(name)s - %(message)s",
-    force=True)                            # override Databricks defaults
+    force=True)  # override Databricks defaults
 
 import importlib, searchpubmed.pubmed as pubmed
+
 importlib.reload(pubmed)
-    
+
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -88,8 +89,9 @@ def get_pmid_from_pubmed(
             break  # success
         except HTTPError as e:
             status = getattr(e.response, "status_code", None)
-            if status and (status == 429 or 500 <= status < 600) and attempt < max_retries:
-                wait = delay * (2 ** (attempt - 1))
+            if status and (status == 429
+                           or 500 <= status < 600) and attempt < max_retries:
+                wait = delay * (2**(attempt - 1))
                 logger.warning(
                     f"ESearch HTTP {status}; retry {attempt}/{max_retries} in {wait:.1f}s"
                 )
@@ -104,15 +106,15 @@ def get_pmid_from_pubmed(
     try:
         xml_payload = getattr(resp, "content", None) or resp.text
         root = ET.fromstring(xml_payload)
-        pmids = [id_el.text for id_el in root.findall(".//IdList/Id") if id_el.text]
+        pmids = [
+            id_el.text for id_el in root.findall(".//IdList/Id") if id_el.text
+        ]
         # Deduplicate while preserving order
         seen: set[str] = set()
         return [p for p in pmids if not (p in seen or seen.add(p))]
     except ET.ParseError as e:
         logger.error(f"ESearch XML parse error: {e}")
         return []
-
-
 
 
 ##############################################################################
@@ -175,7 +177,7 @@ def map_pmids_to_pmcids(
     total_batches = ceil(len(pmids) / batch_size)
 
     for idx in range(total_batches):
-        chunk = pmids[idx * batch_size : (idx + 1) * batch_size]
+        chunk = pmids[idx * batch_size:(idx + 1) * batch_size]
 
         # Build URL-encoded body once; add each PMID as a separate "id"
         data = [
@@ -187,9 +189,8 @@ def map_pmids_to_pmcids(
             data.append(("api_key", api_key))
         data.extend(("id", pmid) for pmid in chunk)
 
-        logger.info(
-            "ELink batch %d/%d (size=%d)", idx + 1, total_batches, len(chunk)
-        )
+        logger.info("ELink batch %d/%d (size=%d)", idx + 1, total_batches,
+                    len(chunk))
 
         # ── HTTP with retry ─────────────────────────────────────
         response = None
@@ -202,11 +203,16 @@ def map_pmids_to_pmcids(
                 break  # success
             except (HTTPError, RequestException) as exc:
                 status = getattr(exc.response, "status_code", None)
-                if status and (status == 429 or 500 <= status < 600) and attempt < max_retries:
-                    wait = delay * (2 ** (attempt - 1))
+                if status and (status == 429 or
+                               500 <= status < 600) and attempt < max_retries:
+                    wait = delay * (2**(attempt - 1))
                     logger.warning(
                         "Batch %d: HTTP %s, retry %d/%d in %.1fs",
-                        idx + 1, status, attempt, max_retries, wait,
+                        idx + 1,
+                        status,
+                        attempt,
+                        max_retries,
+                        wait,
                     )
                     time.sleep(wait)
                     continue
@@ -233,11 +239,9 @@ def map_pmids_to_pmcids(
             if not pmid_text:
                 continue
             pmcids = [
-                link.text
-                for db in linkset.findall("LinkSetDb")
+                link.text for db in linkset.findall("LinkSetDb")
                 if db.findtext("DbTo") == "pmc"
-                for link in db.findall("Link/Id")
-                if link.text
+                for link in db.findall("Link/Id") if link.text
             ]
             if pmcids:
                 records.extend((pmid_text, pmcid) for pmcid in pmcids)
@@ -247,14 +251,11 @@ def map_pmids_to_pmcids(
         time.sleep(delay)
 
     # Always deduplicate before returning
-    df = (
-        pd.DataFrame(records, columns=["pmid", "pmcid"])
-        .astype("string")
-        .drop_duplicates(ignore_index=True)
-    )
+    df = (pd.DataFrame(records, columns=[
+        "pmid", "pmcid"
+    ]).astype("string").drop_duplicates(ignore_index=True))
 
     return df
-
 
 
 def get_pubmed_metadata_pmid(
@@ -313,12 +314,20 @@ def get_pubmed_metadata_pmid(
       filled with ``"N/A"``.
     """
     # ── Guard clause ────────────────────────────────────────────
-    unique_pmids = list(dict.fromkeys(pmids))        # de-dup, keep order
+    unique_pmids = list(dict.fromkeys(pmids))  # de-dup, keep order
     if not unique_pmids:
         return pd.DataFrame(columns=[
-            "pmid", "title", "abstract", "journal", "publicationDate",
-            "doi", "firstAuthor", "lastAuthor",
-            "authorAffiliations", "meshTags", "keywords",
+            "pmid",
+            "title",
+            "abstract",
+            "journal",
+            "publicationDate",
+            "doi",
+            "firstAuthor",
+            "lastAuthor",
+            "authorAffiliations",
+            "meshTags",
+            "keywords",
         ]).astype("string")
 
     base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
@@ -334,7 +343,8 @@ def get_pubmed_metadata_pmid(
         d = elem.findtext("Day") or ""
         if y and m:
             try:
-                return dateparser.parse(f"{y} {m} {d or '1'}").date().isoformat()
+                return dateparser.parse(
+                    f"{y} {m} {d or '1'}").date().isoformat()
             except Exception:
                 return "-".join(p for p in (y, m, d) if p)
         return elem.findtext("MedlineDate") or y or "N/A"
@@ -365,12 +375,12 @@ def get_pubmed_metadata_pmid(
                 break
             except HTTPError as e:
                 status = getattr(e.response, "status_code", None)
-                if status and (status == 429 or 500 <= status < 600) and attempt < max_retries:
-                    wait = delay * (2 ** (attempt - 1))
+                if status and (status == 429 or
+                               500 <= status < 600) and attempt < max_retries:
+                    wait = delay * (2**(attempt - 1))
                     logger.warning(
                         f"Batch {start//batch_size+1}: HTTP {status}; retry in {wait:.1f}s "
-                        f"(attempt {attempt}/{max_retries})"
-                    )
+                        f"(attempt {attempt}/{max_retries})")
                     time.sleep(wait)
                     continue
                 logger.error(f"EFetch HTTP error for PMIDs {batch}: {e}")
@@ -382,11 +392,13 @@ def get_pubmed_metadata_pmid(
         if resp is None or not resp.ok:
             # total failure → placeholder rows
             for pmid in batch:
-                records.append({k: "N/A" for k in (
-                    "title", "abstract", "journal", "publicationDate", "doi",
-                    "firstAuthor", "lastAuthor", "authorAffiliations",
-                    "meshTags", "keywords"
-                )} | {"pmid": "N/A"})
+                records.append({
+                    k: "N/A"
+                    for k in ("title", "abstract", "journal",
+                              "publicationDate", "doi", "firstAuthor",
+                              "lastAuthor", "authorAffiliations", "meshTags",
+                              "keywords")
+                } | {"pmid": "N/A"})
             continue
 
         # ---- XML parse ----------------------------------------
@@ -395,11 +407,13 @@ def get_pubmed_metadata_pmid(
         except ET.ParseError as e:
             logger.error(f"XML parse error for PMIDs {batch}: {e}")
             for pmid in batch:
-                records.append({k: "N/A" for k in (
-                    "title", "abstract", "journal", "publicationDate", "doi",
-                    "firstAuthor", "lastAuthor", "authorAffiliations",
-                    "meshTags", "keywords"
-                )} | {"pmid": "N/A"})
+                records.append({
+                    k: "N/A"
+                    for k in ("title", "abstract", "journal",
+                              "publicationDate", "doi", "firstAuthor",
+                              "lastAuthor", "authorAffiliations", "meshTags",
+                              "keywords")
+                } | {"pmid": "N/A"})
             time.sleep(delay)
             continue
 
@@ -409,16 +423,16 @@ def get_pubmed_metadata_pmid(
 
             title = art.findtext(".//ArticleTitle", default="N/A").strip()
 
-            abstract = " ".join(
-                t.text or "" for t in art.findall(".//Abstract/AbstractText")
-            ).strip() or "N/A"
+            abstract = " ".join(t.text or "" for t in art.findall(
+                ".//Abstract/AbstractText")).strip() or "N/A"
 
             journal = art.findtext(".//Journal/Title", default="N/A")
 
             pubdate_elem = art.find(".//JournalIssue/PubDate")
             publication_date = _parse_pubdate(pubdate_elem)
 
-            doi = art.findtext('.//ArticleIdList/ArticleId[@IdType="doi"]', default="N/A")
+            doi = art.findtext('.//ArticleIdList/ArticleId[@IdType="doi"]',
+                               default="N/A")
 
             authors = art.findall(".//AuthorList/Author")
             first_author = _fullname(authors[0]) if authors else "N/A"
@@ -431,12 +445,12 @@ def get_pubmed_metadata_pmid(
             author_affiliations = "; ".join(affiliations) or "N/A"
 
             mesh_tags = ", ".join(
-                mh.text for mh in art.findall(".//MeshHeading/DescriptorName") if mh.text
-            ) or "N/A"
+                mh.text for mh in art.findall(".//MeshHeading/DescriptorName")
+                if mh.text) or "N/A"
 
             keywords = ", ".join(
-                kw.text for kw in art.findall(".//KeywordList/Keyword") if kw.text
-            ) or "N/A"
+                kw.text for kw in art.findall(".//KeywordList/Keyword")
+                if kw.text) or "N/A"
 
             records.append({
                 "pmid": pmid,
@@ -454,12 +468,8 @@ def get_pubmed_metadata_pmid(
 
         time.sleep(delay)
 
-    return (
-        pd.DataFrame(records)
-          .astype("string")
-          .sort_values("pmid", ignore_index=True)
-    )
-
+    return (pd.DataFrame(records).astype("string").sort_values(
+        "pmid", ignore_index=True))
 
 
 def get_pubmed_metadata_pmcid(
@@ -492,16 +502,27 @@ def get_pubmed_metadata_pmcid(
     # ── Guard clause ────────────────────────────────────────────
     if not pmcids:
         cols = [
-            "pmcid", "pmid", "title", "abstract", "journal",
-            "publicationDate", "doi", "firstAuthor", "lastAuthor",
-            "authorAffiliations", "meshTags", "keywords",
+            "pmcid",
+            "pmid",
+            "title",
+            "abstract",
+            "journal",
+            "publicationDate",
+            "doi",
+            "firstAuthor",
+            "lastAuthor",
+            "authorAffiliations",
+            "meshTags",
+            "keywords",
         ]
         return pd.DataFrame(columns=cols).astype("string")
 
     # Normalise IDs (“12345” → “PMC12345”)
-    norm_ids = [pid if str(pid).upper().startswith("PMC") else f"PMC{pid}"
-                for pid in pmcids]
-    unique_ids = list(dict.fromkeys(norm_ids))       # de-dup, keep order
+    norm_ids = [
+        pid if str(pid).upper().startswith("PMC") else f"PMC{pid}"
+        for pid in pmcids
+    ]
+    unique_ids = list(dict.fromkeys(norm_ids))  # de-dup, keep order
 
     # Helpers ───────────────────────────────────────────────────
     def _strip_default_ns(xml_bytes: bytes) -> bytes:
@@ -509,7 +530,8 @@ def get_pubmed_metadata_pmcid(
         return re.sub(rb'\sxmlns="[^"]+"', b"", xml_bytes, count=1)
 
     def _fullname(author: ET.Element) -> str:
-        fore = author.findtext("given-names") or author.findtext("initials") or ""
+        fore = author.findtext("given-names") or author.findtext(
+            "initials") or ""
         last = author.findtext("surname") or ""
         name = f"{fore} {last}".strip()
         return name or "N/A"
@@ -540,9 +562,10 @@ def get_pubmed_metadata_pmcid(
             except requests.HTTPError as e:
                 status = e.response.status_code
                 if status in (429, *range(500, 600)) and attempt < max_retries:
-                    wait = delay * (2 ** (attempt - 1))
-                    logger.warning(f"Batch {idx+1}: HTTP {status}; "
-                                   f"retry {attempt}/{max_retries} in {wait:.1f}s")
+                    wait = delay * (2**(attempt - 1))
+                    logger.warning(
+                        f"Batch {idx+1}: HTTP {status}; "
+                        f"retry {attempt}/{max_retries} in {wait:.1f}s")
                     time.sleep(wait)
                     continue
                 logger.error(f"Batch {idx+1}: HTTP error {e}")
@@ -554,10 +577,13 @@ def get_pubmed_metadata_pmcid(
         if resp is None or not resp.ok:
             # total failure → placeholder rows
             for cid in chunk:
-                records.append({"pmcid": cid, **{k: "N/A" for k in (
-                    "pmid", "title", "abstract", "journal", "publicationDate",
-                    "doi", "firstAuthor", "lastAuthor", "authorAffiliations",
-                    "meshTags", "keywords")} })
+                records.append({
+                    "pmcid": cid,
+                    **{
+                        k: "N/A"
+                        for k in ("pmid", "title", "abstract", "journal", "publicationDate", "doi", "firstAuthor", "lastAuthor", "authorAffiliations", "meshTags", "keywords")
+                    }
+                })
             continue
 
         # ── XML parse ─────────────────────────────────────────
@@ -566,10 +592,13 @@ def get_pubmed_metadata_pmcid(
         except ET.ParseError as e:
             logger.error(f"Batch {idx+1}: XML parse error {e}")
             for cid in chunk:
-                records.append({"pmcid": cid, **{k: "N/A" for k in (
-                    "pmid", "title", "abstract", "journal", "publicationDate",
-                    "doi", "firstAuthor", "lastAuthor", "authorAffiliations",
-                    "meshTags", "keywords")}})
+                records.append({
+                    "pmcid": cid,
+                    **{
+                        k: "N/A"
+                        for k in ("pmid", "title", "abstract", "journal", "publicationDate", "doi", "firstAuthor", "lastAuthor", "authorAffiliations", "meshTags", "keywords")
+                    }
+                })
             time.sleep(delay)
             continue
 
@@ -578,29 +607,30 @@ def get_pubmed_metadata_pmcid(
             pmcid = next(
                 (art.findtext(f'.//article-id[@pub-id-type="{t}"]')
                  for t in ("pmcid", "pmc", "pmcid-ver", "pmcaid")
-                 if art.find(f'.//article-id[@pub-id-type="{t}"]') is not None),
+                 if art.find(f'.//article-id[@pub-id-type="{t}"]') is not None
+                 ),
                 "N/A",
             )
             if pmcid and "." in pmcid:
                 pmcid = pmcid.split(".", 1)[0]
             if pmcid and not pmcid.upper().startswith("PMC"):
                 pmcid = f"PMC{pmcid}"
-            pmid  = art.findtext('.//article-id[@pub-id-type="pmid"]', default="N/A")
-            title = (art.findtext(".//article-title", default="N/A") or "").strip()
+            pmid = art.findtext('.//article-id[@pub-id-type="pmid"]',
+                                default="N/A")
+            title = (art.findtext(".//article-title", default="N/A")
+                     or "").strip()
 
             # Abstract paragraphs joined
             abstract = " ".join(
-                p.text or "" for p in art.findall(".//abstract//p")
-            ).strip() or "N/A"
+                p.text or ""
+                for p in art.findall(".//abstract//p")).strip() or "N/A"
 
             journal = art.findtext(".//journal-title", default="N/A")
 
             # Publication date (take <pub-date publication-format="electronic"> if present)
-            pub_date_elem = (
-                art.find('.//pub-date[@pub-type="epub"]') or
-                art.find('.//pub-date[@pub-type="pub"]') or
-                art.find(".//pub-date")
-            )
+            pub_date_elem = (art.find('.//pub-date[@pub-type="epub"]')
+                             or art.find('.//pub-date[@pub-type="pub"]')
+                             or art.find(".//pub-date"))
             if pub_date_elem is not None:
                 y = pub_date_elem.findtext("year") or ""
                 m = pub_date_elem.findtext("month") or ""
@@ -609,11 +639,13 @@ def get_pubmed_metadata_pmcid(
             else:
                 publication_date = "N/A"
 
-            doi = art.findtext('.//article-id[@pub-id-type="doi"]', default="N/A")
+            doi = art.findtext('.//article-id[@pub-id-type="doi"]',
+                               default="N/A")
 
-            authors = art.findall(".//contrib-group/contrib[@contrib-type='author']")
+            authors = art.findall(
+                ".//contrib-group/contrib[@contrib-type='author']")
             first_author = _fullname(authors[0]) if authors else "N/A"
-            last_author  = _fullname(authors[-1]) if authors else "N/A"
+            last_author = _fullname(authors[-1]) if authors else "N/A"
 
             affiliations = [
                 aff.text for aff in art.findall(".//aff") if aff.text
@@ -621,22 +653,20 @@ def get_pubmed_metadata_pmcid(
             author_affiliations = "; ".join(affiliations) or "N/A"
 
             # MeSH in JATS appears under <kwd-group kwd-group-type="MeSH">
-            mesh_tags = ", ".join(                          # modern kwd-group layout
-                kw.text for kg in art.findall('.//kwd-group[@kwd-group-type="MeSH"]')
-                        for kw in kg.findall(".//kwd") if kw.text
-            ) or ", ".join(                                 # ← fallback for fixture
-                mh.text for mh in art.findall(".//mesh-heading-list/mesh-heading/descriptor-name")
-                if mh.text
-            ) or "N/A"
+            mesh_tags = ", ".join(  # modern kwd-group layout
+                kw.text
+                for kg in art.findall('.//kwd-group[@kwd-group-type="MeSH"]')
+                for kw in kg.findall(".//kwd")
+                if kw.text) or ", ".join(  # ← fallback for fixture
+                    mh.text for mh in art.findall(
+                        ".//mesh-heading-list/mesh-heading/descriptor-name")
+                    if mh.text) or "N/A"
 
             # Author‐provided keywords → any kwd-group **without** @kwd-group-type
-            keywords = ", ".join(
-                kw.text
-                for kg in art.findall(".//kwd-group")
-                if "kwd-group-type" not in kg.attrib
-                for kw in kg.findall(".//kwd")
-                if kw.text
-            ) or "N/A"
+            keywords = ", ".join(kw.text for kg in art.findall(".//kwd-group")
+                                 if "kwd-group-type" not in kg.attrib
+                                 for kw in kg.findall(".//kwd")
+                                 if kw.text) or "N/A"
 
             records.append({
                 "pmcid": pmcid,
@@ -655,12 +685,8 @@ def get_pubmed_metadata_pmcid(
 
         time.sleep(delay)
 
-    return (
-        pd.DataFrame(records)
-        .astype("string")
-        .sort_values("pmcid", ignore_index=True)
-    )
-
+    return (pd.DataFrame(records).astype("string").sort_values(
+        "pmcid", ignore_index=True))
 
 
 def _strip_default_ns(xml_bytes: bytes) -> bytes:
@@ -669,8 +695,6 @@ def _strip_default_ns(xml_bytes: bytes) -> bytes:
     returned XML is easy to address with bare tag names.
     """
     return re.sub(rb'\sxmlns="[^"]+"', b"", xml_bytes, count=1)
-
-
 
 def get_pmc_full_xml(
     pmcids: List[str],
@@ -689,7 +713,7 @@ def get_pmc_full_xml(
     Parameters
     ----------
     pmcids : list[str]
-        PMC IDs *with or without* the “PMC” prefix (e.g. ``["PMC123", "456"]``).
+        PMC IDs *with or without* the “PMC” prefix (e.g. ["PMC123", "456"]).
     api_key : str | None, optional
         NCBI API key – lifts the personal rate-limit to ≈10 req s⁻¹.
     batch_size : int, default 200
@@ -706,33 +730,24 @@ def get_pmc_full_xml(
     pandas.DataFrame
         Columns
         --------
-        ``pmcid``   | string  
-        ``fullXML`` | string  (entire `<article>` subtree or ``"N/A"``)
-        ``isFullText``| bool    (True ⇢ a <body> element exists)
-        ``hasSuppMat``  | bool  (True ⇢ supplementary material present)
+        pmcid       | string  
+        fullXML     | string  (entire `<article>` subtree or "N/A")
+        isFullText  | boolean (True ⇢ a <body> element exists)
+        hasSuppMat  | boolean (True ⇢ supplementary material present)
 
         Every PMC ID you supplied is represented exactly once—even if the
         record is missing, withdrawn, or the request fails.
-
-    Example
-    -------
-    >>> df_xml = get_pmc_full_xml(["PMC9054321", "9054322"])
-    >>> df_xml.loc[0, "fullXML"][:500]   # first 500 chars
-    '<article article-type="research-article" ...'
     """
     # ── Guard clause ────────────────────────────────────────────
     if not pmcids:
-        return (
-            pd.DataFrame(columns=["pmcid", "fullXML", "isFullText", "hasSuppMat"])
-              .astype(
-                  {
-                      "pmcid": "string",
-                      "fullXML": "string",
-                      "isFullText": "boolean",
-                      "hasSuppMat": "boolean",
-                  }
-              )
-        )
+        return (pd.DataFrame(
+            columns=["pmcid", "fullXML", "isFullText", "hasSuppMat"]
+        ).astype({
+            "pmcid":      "string",
+            "fullXML":    "string",
+            "isFullText": "boolean",
+            "hasSuppMat": "boolean",
+        }))
 
     # --- Prefix-safe normalisation ----------------------------------
     norm_ids = [
@@ -748,11 +763,12 @@ def get_pmc_full_xml(
 
     # ── Main loop ───────────────────────────────────────────────
     for b_idx in range(total_batches):
-        chunk = norm_ids[b_idx * batch_size : (b_idx + 1) * batch_size]
+        chunk = norm_ids[b_idx * batch_size:(b_idx + 1) * batch_size]
         params = {"db": "pmc", "retmode": "xml", "id": ",".join(chunk)}
         if api_key:
             params["api_key"] = api_key
 
+        # ── Fetch with retries ────────────────────────────────────
         response = None
         for attempt in range(1, max_retries + 1):
             try:
@@ -771,17 +787,14 @@ def get_pmc_full_xml(
                 logger.error(f"Batch {b_idx+1} failed: {exc}")
                 break
 
+        # ── On complete failure, emit placeholders and continue ────
         if response is None or not response.ok:
-            # give every ID in the chunk a placeholder row
-            records.extend(
-                    {
-                        "pmcid": cid,
-                        "fullXML": "N/A",
-                        "isFullText": False,
-                        "hasSuppMat": False,
-                    }
-                for cid in chunk
-            )
+            records.extend({
+                "pmcid":     cid,
+                "fullXML":   "N/A",
+                "isFullText": False,
+                "hasSuppMat": False,
+            } for cid in chunk)
             continue
 
         # ── Parse / strip namespace ─────────────────────────────
@@ -789,70 +802,73 @@ def get_pmc_full_xml(
             root = ET.fromstring(_strip_default_ns(response.content))
         except ET.ParseError as e:
             logger.error(f"XML parse error in batch {b_idx+1}: {e}")
-            records.extend(
-                {
-                    "pmcid": cid,
-                    "fullXML": "N/A",
-                    "isFullText": False,
-                    "hasSuppMat": False,
-                }
-                for cid in chunk
-            )
+            records.extend({
+                "pmcid":     cid,
+                "fullXML":   "N/A",
+                "isFullText": False,
+                "hasSuppMat": False,
+            } for cid in chunk)
             time.sleep(delay)
             continue
 
-        # EFetch returns multiple <article> elements in one payload
+        # ── Extract <article> records ───────────────────────────
         seen = set()
         for art in root.findall(".//article"):
-            pmcid_text = art.findtext('.//article-id[@pub-id-type="pmc"]') or "N/A"
-            xml_str = ET.tostring(art, encoding="unicode")
+            # Robust PMCID extraction & normalisation
+            pmcid_text = next(
+                (
+                    art.findtext(f'.//article-id[@pub-id-type="{t}"]')
+                    for t in ("pmcid", "pmc", "pmcid-ver", "pmcaid")
+                    if art.find(f'.//article-id[@pub-id-type="{t}"]') is not None
+                ),
+                "N/A",
+            )
+            # Drop version suffixes, enforce "PMC" prefix
+            if "." in pmcid_text:
+                pmcid_text = pmcid_text.split(".", 1)[0]
+            if not pmcid_text.upper().startswith("PMC"):
+                pmcid_text = f"PMC{pmcid_text}"
+
+            xml_str  = ET.tostring(art, encoding="unicode")
             has_body = art.find(".//body") is not None
             has_supp = any(
-                art.find(path) is not None
-                for path in (
+                art.find(path) is not None for path in (
                     ".//supplementary-material",
                     ".//inline-supplementary-material",
                     ".//sub-article[@article-type='supplementary-material']",
                 )
             )
-            records.append(
-                {
-                    "pmcid": pmcid_text,
-                    "fullXML": xml_str,
-                    "isFullText": has_body,
-                    "hasSuppMat": has_supp,
-                }
-                        )
+
+            records.append({
+                "pmcid":      pmcid_text,
+                "fullXML":    xml_str,
+                "isFullText": has_body,
+                "hasSuppMat": has_supp,
+            })
             seen.add(pmcid_text)
 
-        # Any IDs not returned (e.g., embargoed or withdrawn) → placeholder
+        # ── Placeholder rows for any IDs not returned ────────────
         for cid in chunk:
             if cid not in seen:
-                records.append(
-                {
-                    "pmcid": cid,
-                    "fullXML": "N/A",
+                records.append({
+                    "pmcid":      cid,
+                    "fullXML":    "N/A",
                     "isFullText": pd.NA,
                     "hasSuppMat": pd.NA,
-                }
-                )
+                })
 
         time.sleep(delay)
 
-    return (
-        pd.DataFrame(records)
-          .astype(
-              {
-                  "pmcid": "string",
-                  "fullXML": "string",
-                  "isFullText": "boolean",
-                  "hasSuppMat": "boolean",
-              }
-          )
-    )
-    
-    
-    
+    # ── Final DataFrame with enforced dtypes ───────────────────
+    return pd.DataFrame(records).astype({
+        "pmcid":      "string",
+        "fullXML":    "string",
+        "isFullText": "boolean",
+        "hasSuppMat": "boolean",
+    })
+
+
+
 def get_pmc_html_text(
     pmcids: List[str],
     *,
@@ -891,7 +907,8 @@ def get_pmc_html_text(
     """
     # ── Guard clause ────────────────────────────────────────────
     if not pmcids:
-        return pd.DataFrame(columns=["pmcid", "htmlText", "scrapeMsg"]).astype("string")
+        return pd.DataFrame(
+            columns=["pmcid", "htmlText", "scrapeMsg"]).astype("string")
 
     # Preserve the IDs exactly as the caller gave them  ➜ `orig`
     # Canonicalise just for the network call            ➜ `canon`
@@ -900,22 +917,20 @@ def get_pmc_html_text(
     seen: set[str] = set()
     for orig in pmcids:
         canon = orig if str(orig).upper().startswith("PMC") else f"PMC{orig}"
-        if canon not in seen:               # <── ensures we fetch each article once
+        if canon not in seen:  # <── ensures we fetch each article once
             canon_ids.append(canon)
             seen.add(canon)
-        canon_to_orig.setdefault(canon, orig)   # first occurrence wins
+        canon_to_orig.setdefault(canon, orig)  # first occurrence wins
     records = []
 
     base_tpl = "https://pmc.ncbi.nlm.nih.gov/articles/{pid}/?format=flat"
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (compatible; PubMedCrawler/1.0; "
-            "+https://github.com/you/yourrepo)"
-        )
+        "User-Agent": ("Mozilla/5.0 (compatible; PubMedCrawler/1.0; "
+                       "+https://github.com/you/yourrepo)")
     }
 
     # ── Main loop over individual IDs ───────────────────────────
-    for pid in canon_ids:               # use canonical value for the URL
+    for pid in canon_ids:  # use canonical value for the URL
         url = base_tpl.format(pid=pid)
         html_text: str | None = None
         msg = ""
@@ -924,7 +939,7 @@ def get_pmc_html_text(
             try:
                 resp = requests.get(url, headers=headers, timeout=timeout)
                 if resp.status_code in (403, 429) and attempt < max_retries:
-                    wait = delay * (2 ** (attempt - 1))
+                    wait = delay * (2**(attempt - 1))
                     logger.warning(
                         f"{pid}: HTTP {resp.status_code}; retry {attempt}/{max_retries} in {wait:.1f}s"
                     )
@@ -938,21 +953,23 @@ def get_pmc_html_text(
                 main = soup.find(id="maincontent") or soup
                 # Keep HTML (with basic cleanup), not plain text:
                 #   – drop <script>, <style>, navigation junk
-                for tag in main.find_all(["script", "style", "nav", "footer", "aside"]):
+                for tag in main.find_all(
+                    ["script", "style", "nav", "footer", "aside"]):
                     tag.decompose()
 
-                html_text = str(main)     # raw HTML as str
+                html_text = str(main)  # raw HTML as str
                 break  # success – leave retry loop
 
             except (HTTPError, RequestException) as exc:
                 msg = f"{type(exc).__name__}: {exc}"
                 if attempt < max_retries:
-                    wait = delay * (2 ** (attempt - 1))
+                    wait = delay * (2**(attempt - 1))
                     time.sleep(wait)
                     continue
-                logger.error(f"{pid}: giving up after {max_retries} attempts – {msg}")
+                logger.error(
+                    f"{pid}: giving up after {max_retries} attempts – {msg}")
                 html_text = None
-            except Exception as exc:      # BeautifulSoup / unexpected
+            except Exception as exc:  # BeautifulSoup / unexpected
                 msg = f"{type(exc).__name__}: {exc}"
                 logger.error(f"{pid}: parsing error – {msg}")
                 html_text = None
@@ -965,20 +982,15 @@ def get_pmc_html_text(
             "pmcid": canon_to_orig.get(pid, pid),
             "htmlText": html_text or "N/A",
             "scrapeMsg": msg,
-         })
+        })
 
     return pd.DataFrame(records).astype("string")
-    
-    
-    
 
 
-def get_pmc_full_text(
-    pmcids: List[str] | str,
-    *,
-    xml_fallback_min_chars: int = 2_000,
-    timeout: int = 20
-) -> dict[str, str]:
+def get_pmc_full_text(pmcids: List[str] | str,
+                      *,
+                      xml_fallback_min_chars: int = 2_000,
+                      timeout: int = 20) -> dict[str, str]:
     """
     Retrieve plain full-text for one or many PMCIDs:
       1) try the “flat” HTML view,
@@ -1004,16 +1016,15 @@ def get_pmc_full_text(
 
     flat_tpl = "https://pmc.ncbi.nlm.nih.gov/articles/{pid}/?format=flat"
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (compatible; PubMedCrawler/1.1; "
-            "+https://github.com/OHDSI/searchpubmed)"
-        )
+        "User-Agent": ("Mozilla/5.0 (compatible; PubMedCrawler/1.1; "
+                       "+https://github.com/OHDSI/searchpubmed)")
     }
 
     out: dict[str, str] = {}
 
     for raw_id in pmcids:
-        pid = raw_id if str(raw_id).upper().startswith("PMC") else f"PMC{raw_id}"
+        pid = raw_id if str(raw_id).upper().startswith(
+            "PMC") else f"PMC{raw_id}"
         text = ""
         success = False
 
@@ -1025,8 +1036,7 @@ def get_pmc_full_text(
             soup = BeautifulSoup(r.text, "html.parser")
             main = soup.find(id="maincontent") or soup
             flat_text = " ".join(
-                p.get_text(" ", strip=True) for p in main.find_all("p")
-            )
+                p.get_text(" ", strip=True) for p in main.find_all("p"))
             text = flat_text.strip()
             success = len(text) >= xml_fallback_min_chars
             if success:
@@ -1040,8 +1050,7 @@ def get_pmc_full_text(
                 # build a single URL so we don’t pass a params= kwarg
                 xml_url = (
                     "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
-                    f"?db=pmc&id={pid}&retmode=xml"
-                )
+                    f"?db=pmc&id={pid}&retmode=xml")
                 r = requests.get(xml_url, headers=headers, timeout=timeout)
                 r.raise_for_status()
 
@@ -1049,11 +1058,9 @@ def get_pmc_full_text(
                 xml_content = _strip_default_ns(r.content)
                 root = ET.fromstring(xml_content)
                 body = root.find(".//body")
-                xml_text = (
-                    ET.tostring(body, encoding="unicode", method="text").strip()
-                    if body is not None
-                    else ""
-                )
+                xml_text = (ET.tostring(
+                    body, encoding="unicode", method="text").strip()
+                            if body is not None else "")
 
                 # keep whichever text is longer
                 if len(xml_text) > len(text):
@@ -1066,8 +1073,8 @@ def get_pmc_full_text(
         time.sleep(0.1)  # courtesy delay
 
     return out
-    
-    
+
+
 def _scrape_pmc_standard_html(pmcid: str, *, timeout: int = 20) -> str:
     """
     Fetch the *regular* PMC HTML (not the `?format=flat` view) and return
@@ -1080,13 +1087,14 @@ def _scrape_pmc_standard_html(pmcid: str, *, timeout: int = 20) -> str:
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
         # drop nav / scripts
-        for tag in soup.find_all(["script", "style", "nav", "footer", "aside"]):
+        for tag in soup.find_all(["script", "style", "nav", "footer",
+                                  "aside"]):
             tag.decompose()
         return soup.get_text(" ", strip=True)
     except Exception as exc:
         logger.warning(f"{pmcid}: standard HTML scrape failed – {exc}")
         return "N/A"
-        
+
 
 ##############################################################################
 #  Main workflow                                                             #
@@ -1116,60 +1124,74 @@ def fetch_pubmed_fulltexts(
     The column order in the final frame is:
         [pmid] + PubMed-meta + [pmcid] + PMC-meta(_pmcid) + text columns
     """
-    
-    pmids = get_pmid_from_pubmed(
-        query, retmax=retmax, api_key=api_key,
-        timeout=timeout, max_retries=max_retries, delay=delay
-    )
+
+    pmids = get_pmid_from_pubmed(query,
+                                 retmax=retmax,
+                                 api_key=api_key,
+                                 timeout=timeout,
+                                 max_retries=max_retries,
+                                 delay=delay)
     if not pmids:
         logger.warning("No PMIDs returned – exiting early")
         return pd.DataFrame().astype("string")
-        
+
     # ── how many unique PMIDs did we get? ────────────────────────────────
     n_unique = len(set(pmids))
     logger.info("ESearch returned %d unique PMIDs for %r", n_unique, query)
 
-    pmid_pmcid = map_pmids_to_pmcids(
-        pmids, api_key=api_key, batch_size=batch_size,
-        timeout=timeout, max_retries=max_retries, delay=delay
-    )  # columns: pmid, pmcid  
+    pmid_pmcid = map_pmids_to_pmcids(pmids,
+                                     api_key=api_key,
+                                     batch_size=batch_size,
+                                     timeout=timeout,
+                                     max_retries=max_retries,
+                                     delay=delay)  # columns: pmid, pmcid
 
-  
-    meta_df = get_pubmed_metadata_pmid(
-        pmids, api_key=api_key, batch_size=batch_size,
-        timeout=timeout, max_retries=max_retries, delay=delay
-    )  # key = pmid
+    meta_df = get_pubmed_metadata_pmid(pmids,
+                                       api_key=api_key,
+                                       batch_size=batch_size,
+                                       timeout=timeout,
+                                       max_retries=max_retries,
+                                       delay=delay)  # key = pmid
 
     # ── 4) PMC‐level metadata ───────────────────────────────────────────────
 
     pmcids = pmid_pmcid["pmcid"].dropna().unique().tolist()
     pmc_meta_df = get_pubmed_metadata_pmcid(
-        pmcids, api_key=api_key, batch_size=batch_size,
-        timeout=timeout, max_retries=max_retries, delay=delay
-    )  # key = pmid and pmcid
-    
+        pmcids,
+        api_key=api_key,
+        batch_size=batch_size,
+        timeout=timeout,
+        max_retries=max_retries,
+        delay=delay)  # key = pmid and pmcid
+
     # rename every column except the two keys
     pmc_meta_df = pmc_meta_df.rename(
-        columns=lambda c: f"{c}_pmcid" if c not in {"pmid", "pmcid"} else c
-    )
+        columns=lambda c: f"{c}_pmcid" if c not in {"pmid", "pmcid"} else c)
 
     # ── 5) Full texts (XML + flat HTML) ────────────────────────────────────
 
     xml_df = (
         get_pmc_full_xml(
-            pmcids, api_key=api_key, batch_size=batch_size,
-            timeout=timeout, max_retries=max_retries, delay=delay
-        )
-        .rename(columns={"fullXML": "xmlText"})
-        .drop_duplicates(subset="pmcid", keep="first")   # ⬅️ one row per pmcid
+            pmcids,
+            api_key=api_key,
+            batch_size=batch_size,
+            timeout=timeout,
+            max_retries=max_retries,
+            delay=delay).rename(columns={
+                "fullXML": "xmlText"
+            }).drop_duplicates(subset="pmcid",
+                               keep="first")  # ⬅️ one row per pmcid
     )
 
     flat_df = (
-        get_pmc_html_text(
-            pmcids, timeout=timeout, max_retries=max_retries, delay=delay
-        )
-        .rename(columns={"htmlText": "flatHtmlText", "scrapeMsg": "flatHtmlMsg"})
-        .drop_duplicates(subset="pmcid", keep="first")   # ⬅️ same idea
+        get_pmc_html_text(pmcids,
+                          timeout=timeout,
+                          max_retries=max_retries,
+                          delay=delay).rename(columns={
+                              "htmlText": "flatHtmlText",
+                              "scrapeMsg": "flatHtmlMsg"
+                          }).drop_duplicates(subset="pmcid",
+                                             keep="first")  # ⬅️ same idea
     )
 
     # ── 6) Assemble & return ───────────────────────────────────────────────
@@ -1177,52 +1199,50 @@ def fetch_pubmed_fulltexts(
     # join XML + HTML on pmcid
     # 1) bring in the JATS XML
     pmcid_text = pmid_pmcid.merge(
-        xml_df,                 # ← fullXML column lives here
+        xml_df,  # ← fullXML column lives here
         on="pmcid",
-        how="left"
-    )
+        how="left")
 
     # 2) add the flat HTML
     pmcid_texts = pmcid_text.merge(
-        flat_df,                # ← htmlText & scrapeMsg columns
+        flat_df,  # ← htmlText & scrapeMsg columns
         on="pmcid",
-        how="left"
-    )
-    
+        how="left")
+
     # final “wide” join: pmid_pmcid brings in pmid & pmcid, so the two-key merge works
-    
+
     # 1️⃣  Add PubMed-level metadata
     wide_1 = pmid_pmcid.merge(
-        meta_df,           # PubMed metadata
+        meta_df,  # PubMed metadata
         on="pmid",
-        how="left"
-    )
+        how="left")
 
     # 2️⃣  Bring in full-text (PMC) records
     wide_2 = wide_1.merge(
-        pmcid_texts,       # PMC full-text and derived fields
+        pmcid_texts,  # PMC full-text and derived fields
         on=["pmcid", "pmid"],
-        how="left" 
-    )
+        how="left")
 
     # 3️⃣  Attach extra PMC-level metadata
     wide_3 = wide_2.merge(
-        pmc_meta_df,       # “pmcid • pmid” keyed table
+        pmc_meta_df,  # “pmcid • pmid” keyed table
         on=["pmcid", "pmid"],
-        how="left"
-    )
-    
+        how="left")
+
     bool_cols = wide_3.select_dtypes(include="boolean").columns
     if len(bool_cols):
-        wide_3[bool_cols] = wide_3[bool_cols].astype(object)   # or .astype("string")
+        wide_3[bool_cols] = wide_3[bool_cols].astype(
+            object)  # or .astype("string")
 
     # 4️⃣  Standardise missing values
     wide = wide_3.fillna("N/A")
 
     # Column order: PMID-block | PMCID-block | texts
-    pubmed_cols     = [c for c in meta_df.columns if c != "pmid"]
-    pmcid_meta_cols = [c for c in pmc_meta_df.columns if c not in ("pmcid", "pmid")]
-    text_cols       = ["xmlText", "flatHtmlText", "flatHtmlMsg"]
+    pubmed_cols = [c for c in meta_df.columns if c != "pmid"]
+    pmcid_meta_cols = [
+        c for c in pmc_meta_df.columns if c not in ("pmcid", "pmid")
+    ]
+    text_cols = ["xmlText", "flatHtmlText", "flatHtmlMsg"]
 
     ordered = ["pmid", "pmcid"] + pubmed_cols + pmcid_meta_cols + text_cols
 
@@ -1230,13 +1250,9 @@ def fetch_pubmed_fulltexts(
     return wide.loc[:, ordered].astype("string")
 
 
-
-
-def get_pmc_licenses(
-    pmcids: Iterable[str],
-    chunk_size: int = 200,
-    timeout: int = 30
-) -> Dict[str, Optional[str]]:
+def get_pmc_licenses(pmcids: Iterable[str],
+                     chunk_size: int = 200,
+                     timeout: int = 30) -> Dict[str, Optional[str]]:
     """
     Query the PMC OA Web-service and return the licence string
     (e.g. 'CC BY', 'CC BY-NC', 'NO-CC CODE', …) for every PMCID.
@@ -1278,7 +1294,7 @@ def get_pmc_licenses(
     # hit the OA endpoint in chunks
     base = "https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi"
     for i in range(0, len(unique_ids), chunk_size):
-        chunk = unique_ids[i : i + chunk_size]
+        chunk = unique_ids[i:i + chunk_size]
         try:
             r = requests.get(
                 base,
