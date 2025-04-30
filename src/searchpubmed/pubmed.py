@@ -803,16 +803,16 @@ def get_pmc_full_xml(
 
         # EFetch returns multiple <article> elements in one payload
         seen = set()
-        for art in root.findall(".//article"):
-            # ── robust PMCID extraction & normalisation ────────────
-            pmcid_text = next(
-                (
-                    art.findtext(f'.//article-id[@pub-id-type="{t}"]')
-                    for t in ("pmcid", "pmc", "pmcid-ver", "pmcaid")
-                    if art.find(f'.//article-id[@pub-id-type="{t}"]') is not None
-                ),
-                "N/A",
-            )
+    for art in root.findall(".//article"):
+        # ── robust PMCID extraction & normalisation ────────────
+        pmcid_text = next(
+            (
+                art.findtext(f'.//article-id[@pub-id-type="{t}"]')
+                for t in ("pmcid", "pmc", "pmcid-ver", "pmcaid")
+                if art.find(f'.//article-id[@pub-id-type="{t}"]') is not None
+            ),
+            "N/A",
+        )
         # Canonical form: strip version suffixes, add "PMC" prefix
         if pmcid_text and "." in pmcid_text:                # drop “.v1”, “.cited”, …
             pmcid_text = pmcid_text.split(".", 1)[0]
