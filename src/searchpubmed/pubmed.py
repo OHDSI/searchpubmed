@@ -695,6 +695,29 @@ def _strip_default_ns(xml_bytes: bytes) -> bytes:
     returned XML is easy to address with bare tag names.
     """
     return re.sub(rb'\sxmlns="[^"]+"', b"", xml_bytes, count=1)
+    
+    
+# ──────────────────────────────────────────────────────────────
+#  Internal helper: classifies an XML payload as
+#  'medline', 'pmc', or 'unknown' in O(1) time.
+# ──────────────────────────────────────────────────────────────
+def _classify_pubmed_xml(xml_str: str) -> str:
+    """
+    Very fast heuristic:
+        • <article …>            → 'pmc'   (JATS full-text from PMC)
+        • <PubmedArticle…> /     → 'medline' (MEDLINE/PubMed citation)
+          <MedlineCitation…>
+        • anything else          → 'unknown'
+    """
+    if not xml_str or xml_str == "N/A":
+        return "unknown"
+    sniff = xml_str.lstrip()[:72].lower()      # cheap prefix check
+    if sniff.startswith("<article"):
+        return "pmc"
+    if "<medlinecitation" in sniff or "<pubmedarticle" in sniff:
+        return "medline"
+    return "unknown"
+
 
 def get_pmc_full_xml(
     pmcids: List[str],
@@ -721,7 +744,7 @@ def get_pmc_full_xml(
     timeout : int, default 20 s
         Socket timeout for each HTTP request.
     max_retries : int, default 3
-        Attempts per batch on HTTP 429 or 5xx before giving up.
+        Attempts per batch on HTTP-429 / 5xx before giving up.
     delay : float, default 0.34 s
         Base pause between retries (doubles each attempt).
 
@@ -729,27 +752,39 @@ def get_pmc_full_xml(
     -------
     pandas.DataFrame
         Columns
-        --------
-        pmcid       | string  
-        fullXML     | string  (entire `<article>` subtree or "N/A")
-        isFullText  | boolean (True ⇢ a <body> element exists)
-        hasSuppMat  | boolean (True ⇢ supplementary material present)
+        -------
+        pmcid       | string   (canonical “PMC…” identifier)
+        fullXML     | string   (entire `<article>` subtree or "N/A")
+        isFullText  | boolean  (True ⇢ a <body> element exists)
+        hasSuppMat  | boolean  (True ⇢ supplementary material present)
+        xmlKind     | string   ("pmc", "medline", or "unknown")
 
         Every PMC ID you supplied is represented exactly once—even if the
         record is missing, withdrawn, or the request fails.
     """
-    # ── Guard clause ────────────────────────────────────────────
+    # ── Guard clause ───────────────────────────────────────────
     if not pmcids:
-        return (pd.DataFrame(
-            columns=["pmcid", "fullXML", "isFullText", "hasSuppMat"]
-        ).astype({
-            "pmcid":      "string",
-            "fullXML":    "string",
-            "isFullText": "boolean",
-            "hasSuppMat": "boolean",
-        }))
+        return (
+            pd.DataFrame(
+                columns=[
+                    "pmcid",
+                    "fullXML",
+                    "isFullText",
+                    "hasSuppMat",
+                    "xmlKind",
+                ]
+            ).astype(
+                {
+                    "pmcid": "string",
+                    "fullXML": "string",
+                    "isFullText": "boolean",
+                    "hasSuppMat": "boolean",
+                    "xmlKind": "string",
+                }
+            )
+        )
 
-    # --- Prefix-safe normalisation ----------------------------------
+    # --- Prefix-safe normalisation ----------------------------
     norm_ids = [
         pid if str(pid).upper().startswith("PMC") else f"PMC{pid}"
         for pid in pmcids
@@ -761,14 +796,14 @@ def get_pmc_full_xml(
 
     total_batches = ceil(len(norm_ids) / batch_size)
 
-    # ── Main loop ───────────────────────────────────────────────
+    # ── Main loop ─────────────────────────────────────────────
     for b_idx in range(total_batches):
-        chunk = norm_ids[b_idx * batch_size:(b_idx + 1) * batch_size]
+        chunk = norm_ids[b_idx * batch_size : (b_idx + 1) * batch_size]
         params = {"db": "pmc", "retmode": "xml", "id": ",".join(chunk)}
         if api_key:
             params["api_key"] = api_key
 
-        # ── Fetch with retries ────────────────────────────────────
+        # ── Fetch with retries ────────────────────────────────
         response = None
         for attempt in range(1, max_retries + 1):
             try:
@@ -777,95 +812,119 @@ def get_pmc_full_xml(
                 break
             except (HTTPError, RequestException) as exc:
                 status = getattr(exc.response, "status_code", None)
-                if status and (status == 429 or 500 <= status < 600) and attempt < max_retries:
+                if (
+                    status
+                    and (status == 429 or 500 <= status < 600)
+                    and attempt < max_retries
+                ):
                     wait = delay * (2 ** (attempt - 1))
                     logger.warning(
-                        f"Batch {b_idx+1}: HTTP {status}; retry {attempt}/{max_retries} in {wait:.1f}s"
+                        f"Batch {b_idx+1}: HTTP {status}; retry "
+                        f"{attempt}/{max_retries} in {wait:.1f}s"
                     )
                     time.sleep(wait)
                     continue
                 logger.error(f"Batch {b_idx+1} failed: {exc}")
                 break
 
-        # ── On complete failure, emit placeholders and continue ────
+        # ── On complete failure, emit placeholders ────────────
         if response is None or not response.ok:
-            records.extend({
-                "pmcid":     cid,
-                "fullXML":   "N/A",
-                "isFullText": False,
-                "hasSuppMat": False,
-            } for cid in chunk)
+            records.extend(
+                {
+                    "pmcid": cid,
+                    "fullXML": "N/A",
+                    "isFullText": False,
+                    "hasSuppMat": False,
+                    "xmlKind": "unknown",
+                }
+                for cid in chunk
+            )
             continue
 
-        # ── Parse / strip namespace ─────────────────────────────
+        # ── Parse / strip namespace ───────────────────────────
         try:
             root = ET.fromstring(_strip_default_ns(response.content))
         except ET.ParseError as e:
             logger.error(f"XML parse error in batch {b_idx+1}: {e}")
-            records.extend({
-                "pmcid":     cid,
-                "fullXML":   "N/A",
-                "isFullText": False,
-                "hasSuppMat": False,
-            } for cid in chunk)
+            records.extend(
+                {
+                    "pmcid": cid,
+                    "fullXML": "N/A",
+                    "isFullText": False,
+                    "hasSuppMat": False,
+                    "xmlKind": "unknown",
+                }
+                for cid in chunk
+            )
             time.sleep(delay)
             continue
 
-        # ── Extract <article> records ───────────────────────────
-        seen = set()
+        # ── Extract <article> records ─────────────────────────
+        seen: set[str] = set()
         for art in root.findall(".//article"):
             # Robust PMCID extraction & normalisation
             pmcid_text = next(
                 (
                     art.findtext(f'.//article-id[@pub-id-type="{t}"]')
                     for t in ("pmcid", "pmc", "pmcid-ver", "pmcaid")
-                    if art.find(f'.//article-id[@pub-id-type="{t}"]') is not None
+                    if art.find(f'.//article-id[@pub-id-type="{t}"]')
+                    is not None
                 ),
                 "N/A",
             )
-            # Drop version suffixes, enforce "PMC" prefix
-            if "." in pmcid_text:
+            if "." in pmcid_text:  # drop version suffix
                 pmcid_text = pmcid_text.split(".", 1)[0]
             if not pmcid_text.upper().startswith("PMC"):
                 pmcid_text = f"PMC{pmcid_text}"
 
-            xml_str  = ET.tostring(art, encoding="unicode")
+            xml_str = ET.tostring(art, encoding="unicode")
             has_body = art.find(".//body") is not None
             has_supp = any(
-                art.find(path) is not None for path in (
+                art.find(path) is not None
+                for path in (
                     ".//supplementary-material",
                     ".//inline-supplementary-material",
                     ".//sub-article[@article-type='supplementary-material']",
                 )
             )
 
-            records.append({
-                "pmcid":      pmcid_text,
-                "fullXML":    xml_str,
-                "isFullText": has_body,
-                "hasSuppMat": has_supp,
-            })
+            records.append(
+                {
+                    "pmcid": pmcid_text,
+                    "fullXML": xml_str,
+                    "isFullText": has_body,
+                    "hasSuppMat": has_supp,
+                    "xmlKind": _classify_pubmed_xml(xml_str),
+                }
+            )
             seen.add(pmcid_text)
 
-        # ── Placeholder rows for any IDs not returned ────────────
+        # ── Placeholder rows for IDs not returned ─────────────
         for cid in chunk:
             if cid not in seen:
-                records.append({
-                    "pmcid":      cid,
-                    "fullXML":    "N/A",
-                    "isFullText": pd.NA,
-                    "hasSuppMat": pd.NA,
-                })
+                records.append(
+                    {
+                        "pmcid": cid,
+                        "fullXML": "N/A",
+                        "isFullText": pd.NA,
+                        "hasSuppMat": pd.NA,
+                        "xmlKind": "unknown",
+                    }
+                )
 
         time.sleep(delay)
 
-    # ── Final DataFrame with enforced dtypes ───────────────────
-    return pd.DataFrame(records).astype({
-        "pmcid":      "string",
-        "fullXML":    "string",
-        "isFullText": "boolean",
-        "hasSuppMat": "boolean",
-    })
+    # ── Final DataFrame with enforced dtypes ──────────────────
+    return pd.DataFrame(records).astype(
+        {
+            "pmcid": "string",
+            "fullXML": "string",
+            "isFullText": "boolean",
+            "hasSuppMat": "boolean",
+            "xmlKind": "string",
+        }
+    )
+
 
 
 
