@@ -803,9 +803,22 @@ def get_pmc_full_xml(
 
         # EFetch returns multiple <article> elements in one payload
         seen = set()
-        for art in root.findall(".//article"):
-            pmcid_text = art.findtext('.//article-id[@pub-id-type="pmc"]') or "N/A"
-            xml_str = ET.tostring(art, encoding="unicode")
+    for art in root.findall(".//article"):
+        # ── robust PMCID extraction & normalisation ────────────
+        pmcid_text = next(
+            (
+                art.findtext(f'.//article-id[@pub-id-type="{t}"]')
+                for t in ("pmcid", "pmc", "pmcid-ver", "pmcaid")
+                if art.find(f'.//article-id[@pub-id-type="{t}"]') is not None
+            ),
+            "N/A",
+        )
+        # Canonical form: strip version suffixes, add "PMC" prefix
+        if pmcid_text and "." in pmcid_text:                # drop “.v1”, “.cited”, …
+            pmcid_text = pmcid_text.split(".", 1)[0]
+        if pmcid_text and not pmcid_text.upper().startswith("PMC"):
+            pmcid_text = f"PMC{pmcid_text}"
+        xml_str = ET.tostring(art, encoding="unicode")
             has_body = art.find(".//body") is not None
             has_supp = any(
                 art.find(path) is not None
@@ -815,15 +828,15 @@ def get_pmc_full_xml(
                     ".//sub-article[@article-type='supplementary-material']",
                 )
             )
-            records.append(
-                {
-                    "pmcid": pmcid_text,
-                    "fullXML": xml_str,
-                    "isFullText": has_body,
-                    "hasSuppMat": has_supp,
-                }
-                        )
-            seen.add(pmcid_text)
++        records.append(
+             {
+                 "pmcid": pmcid_text,
+                 "fullXML": xml_str,
+                 "isFullText": has_body,
+                 "hasSuppMat": has_supp,
+             }
+        )
+        seen.add(pmcid_text)
 
         # Any IDs not returned (e.g., embargoed or withdrawn) → placeholder
         for cid in chunk:
