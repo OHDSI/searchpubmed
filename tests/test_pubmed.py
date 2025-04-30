@@ -16,6 +16,7 @@ import pandas as pd
 from pandas.testing import assert_frame_equal
 import requests
 from searchpubmed.pubmed import get_pmc_licenses
+from unittest.mock import Mock, patch 
 
 # --------------------------------------------------------------------------- #
 # Helpers                                                                     #
@@ -254,7 +255,6 @@ def _fake_get(url, *, params, timeout, headers):
     fake.raise_for_status = lambda: None
     return fake
 
-from unittest.mock import patch
 def test_get_pmc_licenses_basic():
     pmcids = ["5334499", "PMC10167591", "PMC9999999"]   # mix bare + prefixed
 
