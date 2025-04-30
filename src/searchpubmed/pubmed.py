@@ -915,13 +915,18 @@ def get_pmc_full_xml(
 
         time.sleep(delay)
         
-    df['fullText'] = df['fullXML'].apply(extract_full_text_from_xml)       
+    # 1) build the DataFrame
+    df = pd.DataFrame(records)
 
-    # ── Final DataFrame with enforced dtypes ──────────────────
-    return pd.DataFrame(records).astype(
+    # 2) add the extracted text column
+    df['fullText'] = df['fullXML'].apply(extract_full_text_from_xml)
+
+    # 3) enforce your nullable dtypes (including fullText) and return
+    return df.astype(
         {
             "pmcid": "string",
             "fullXML": "string",
+            "fullText": "string",
             "isFullText": "boolean",
             "hasSuppMat": "boolean",
             "xmlKind": "string",
