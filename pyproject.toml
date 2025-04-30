@@ -23,6 +23,7 @@ dependencies = [
   "pandas>=1.5",
   "beautifulsoup4>=4.12",
   "dateparser>=1.1",
+  "pubmed_parser>=0.5"
 ]
 
 keywords = ["PubMed", "OHDSI", "Epidemiology", "Literature"]
