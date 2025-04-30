@@ -898,6 +898,7 @@ def get_pmc_full_xml(
                 }
             )
             seen.add(pmcid_text)
+                     
 
         # ── Placeholder rows for IDs not returned ─────────────
         for cid in chunk:
@@ -913,6 +914,8 @@ def get_pmc_full_xml(
                 )
 
         time.sleep(delay)
+        
+    pd['fullText'] = pd['fullXML'].apply(extract_full_text_from_xml)       
 
     # ── Final DataFrame with enforced dtypes ──────────────────
     return pd.DataFrame(records).astype(
@@ -1221,3 +1224,54 @@ def get_pmc_licenses(pmcids: Iterable[str],
                 out[pid] = lic
 
     return out
+
+
+
+
+
+def extract_full_text_from_xml(xml_string: str) -> str:
+    """
+    Parse an NCBI efetch XML string and return the entire article text
+    (all <abstract> blocks + every <sec> under <body>), in reading order,
+    with double-newlines separating logical blocks.
+    """
+    # parse (will raise if truly malformed)
+    root = ET.fromstring(xml_string)
+
+    def local_name(elem):
+        # strip namespace, if present
+        return elem.tag.split('}', 1)[-1]
+
+    blocks = []
+
+    # 1) Abstracts (there may be multiple)
+    for abstr in root.iter():
+        if local_name(abstr) == "abstract":
+            # optional title
+            for child in list(abstr):
+                if local_name(child) == "title" and child.text and child.text.strip():
+                    blocks.append(child.text.strip())
+            # all paragraphs under this abstract
+            for p in abstr.iter():
+                if local_name(p) == "p":
+                    text = "".join(p.itertext()).strip()
+                    if text:
+                        blocks.append(text)
+
+    # 2) Body sections
+    for body in root.iter():
+        if local_name(body) == "body":
+            for sec in body.iter():
+                if local_name(sec) == "sec":
+                    # section heading
+                    for child in list(sec):
+                        if local_name(child) == "title" and child.text and child.text.strip():
+                            blocks.append(child.text.strip())
+                    # paragraphs in this section
+                    for p in sec.iter():
+                        if local_name(p) == "p":
+                            text = "".join(p.itertext()).strip()
+                            if text:
+                                blocks.append(text)
+
+    return "\n\n".join(blocks)
