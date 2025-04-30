@@ -1211,6 +1211,10 @@ def fetch_pubmed_fulltexts(
         on=["pmcid", "pmid"],
         how="left"
     )
+    
+    bool_cols = wide_3.select_dtypes(include="boolean").columns
+    if len(bool_cols):
+        wide_3[bool_cols] = wide_3[bool_cols].astype(object)   # or .astype("string")
 
     # 4️⃣  Standardise missing values
     wide = wide_3.fillna("N/A")

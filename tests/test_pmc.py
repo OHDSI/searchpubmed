@@ -36,7 +36,8 @@ def test_strip_default_ns():
 def test_get_pmc_full_xml(monkeypatch):
     monkeypatch.setattr(p.requests.Session, "get", lambda *a, **k: GOOD_XML)
     df = p.get_pmc_full_xml(["42"])
-    assert list(df.columns) == ["pmcid", "fullXML"]
+    expected = ["pmcid", "fullXML", "isFullText", "hasSuppMat"]
+    assert set(expected) <= set(df.columns) 
     assert df.loc[0, "pmcid"] == "PMC42"
     assert "<article-id pub-id-type=\"pmc\">PMC42" in df.loc[0, "fullXML"]
 

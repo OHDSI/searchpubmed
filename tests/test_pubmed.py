@@ -253,7 +253,7 @@ def _fake_get(url, *, params, timeout, headers):
     fake.raise_for_status = lambda: None
     return fake
 
-
+from unittest.mock import patch
 def test_fetch_pmc_licenses_basic():
     pmcids = ["5334499", "PMC10167591", "PMC9999999"]   # mix bare + prefixed
 
