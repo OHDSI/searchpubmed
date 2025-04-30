@@ -15,6 +15,8 @@ import pytest
 import pandas as pd
 from pandas.testing import assert_frame_equal
 import requests
+from searchpubmed.pubmed import get_pmc_licenses
+from unittest.mock import Mock, patch 
 
 # --------------------------------------------------------------------------- #
 # Helpers                                                                     #
@@ -231,3 +233,41 @@ def test_full_text_complete_failure(monkeypatch):
     out = p.get_pmc_full_text(["PMC1", "PMC2"])
     assert out == {"PMC1": "N/A", "PMC2": "N/A"}
 
+
+# --- a minimal OA-service XML payload we’ll inject ---------------
+_SAMPLE_XML = """<?xml version='1.0' encoding='UTF-8'?>
+<oa status="ok">
+  <records>
+    <record pmcid="PMC5334499" license="CC BY-NC" />
+    <record pmcid="PMC10167591" license="CC BY" />
+  </records>
+</oa>"""
+
+
+def _fake_get(url, *, params, timeout, headers):
+    """
+    Fake `requests.get` that ignores its inputs and returns a
+    canned XML doc identical to the OA Web-service’s structure.
+    """
+    fake = Mock()
+    fake.status_code = 200
+    fake.text = _SAMPLE_XML
+    fake.raise_for_status = lambda: None
+    return fake
+
+def test_get_pmc_licenses_basic():
+    pmcids = ["5334499", "PMC10167591", "PMC9999999"]   # mix bare + prefixed
+
+    # Patch `requests.get` only inside this `with` block
+    with patch("requests.get", side_effect=_fake_get):
+        licences = get_pmc_licenses(pmcids)
+
+    # Normalisation: every key should carry the 'PMC' prefix
+    assert set(licences) == {"PMC5334499", "PMC10167591", "PMC9999999"}
+
+    # Expected licences from our sample XML
+    assert licences["PMC5334499"]   == "CC BY-NC"
+    assert licences["PMC10167591"]  == "CC BY"
+
+    # Unknown ID (absent from XML) ➜ None
+    assert licences["PMC9999999"] is None

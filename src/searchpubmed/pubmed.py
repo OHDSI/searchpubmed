@@ -832,8 +832,8 @@ def get_pmc_full_xml(
                 {
                     "pmcid": cid,
                     "fullXML": "N/A",
-                    "isFullText": False,
-                    "hasSuppMat": False,
+                    "isFullText": pd.NA,
+                    "hasSuppMat": pd.NA,
                 }
                 )
 
@@ -1211,6 +1211,10 @@ def fetch_pubmed_fulltexts(
         on=["pmcid", "pmid"],
         how="left"
     )
+    
+    bool_cols = wide_3.select_dtypes(include="boolean").columns
+    if len(bool_cols):
+        wide_3[bool_cols] = wide_3[bool_cols].astype(object)   # or .astype("string")
 
     # 4️⃣  Standardise missing values
     wide = wide_3.fillna("N/A")
@@ -1225,3 +1229,74 @@ def fetch_pubmed_fulltexts(
     logger.info("Done – returning %d rows", len(wide))
     return wide.loc[:, ordered].astype("string")
 
+
+
+
+def get_pmc_licenses(
+    pmcids: Iterable[str],
+    chunk_size: int = 200,
+    timeout: int = 30
+) -> Dict[str, Optional[str]]:
+    """
+    Query the PMC OA Web-service and return the licence string
+    (e.g. 'CC BY', 'CC BY-NC', 'NO-CC CODE', …) for every PMCID.
+
+    Parameters
+    ----------
+    pmcids      : an iterable of PMCIDs (with or without the 'PMC' prefix)
+    chunk_size  : how many IDs to send in one HTTP request
+                  (the service accepts up to ≈300; 200 is a safe default)
+    timeout     : per-request timeout in seconds
+
+    Returns
+    -------
+    dict mapping *pmcid* ➜ *license*  (None if the ID is unknown)
+
+    Notes
+    -----
+    • The call is read-only and doesn’t require an API key.  
+    • When a record is missing the <record … license="…"> attribute
+      you’ll get None, which usually means the article is not in
+      the OA subset or has “other”/unknown rights.
+    """
+
+    def _normalize(pid: str) -> str:
+        """Upper-case & ensure the PMC prefix."""
+        pid = pid.upper()
+        return pid if pid.startswith("PMC") else f"PMC{pid}"
+
+    # normalise, dedupe, & preserve original order
+    unique_ids: List[str] = []
+    seen = set()
+    for pid in map(_normalize, pmcids):
+        if pid not in seen:
+            seen.add(pid)
+            unique_ids.append(pid)
+
+    out: Dict[str, Optional[str]] = {pid: None for pid in unique_ids}
+
+    # hit the OA endpoint in chunks
+    base = "https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi"
+    for i in range(0, len(unique_ids), chunk_size):
+        chunk = unique_ids[i : i + chunk_size]
+        try:
+            r = requests.get(
+                base,
+                params={"id": ",".join(chunk)},
+                timeout=timeout,
+                headers={"User-Agent": "pmc-licence-check/0.1"},
+            )
+            r.raise_for_status()
+        except requests.RequestException as exc:
+            # if the call fails, leave those IDs as None and continue
+            print(f"[WARN] OA service call failed: {exc}")
+            continue
+
+        root = ET.fromstring(r.text)
+        for rec in root.findall(".//record"):
+            pid = _normalize(rec.attrib.get("pmcid", ""))
+            lic = rec.attrib.get("license")
+            if pid:
+                out[pid] = lic
+
+    return out
