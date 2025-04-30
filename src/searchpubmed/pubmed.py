@@ -819,16 +819,16 @@ def get_pmc_full_xml(
         if pmcid_text and not pmcid_text.upper().startswith("PMC"):
             pmcid_text = f"PMC{pmcid_text}"
         xml_str = ET.tostring(art, encoding="unicode")
-            has_body = art.find(".//body") is not None
-            has_supp = any(
-                art.find(path) is not None
-                for path in (
-                    ".//supplementary-material",
-                    ".//inline-supplementary-material",
-                    ".//sub-article[@article-type='supplementary-material']",
-                )
+        has_body = art.find(".//body") is not None
+        has_supp = any(
+            art.find(path) is not None
+            for path in (
+                ".//supplementary-material",
+                ".//inline-supplementary-material",
+                ".//sub-article[@article-type='supplementary-material']",
             )
-+        records.append(
+        )
+        records.append(
              {
                  "pmcid": pmcid_text,
                  "fullXML": xml_str,
