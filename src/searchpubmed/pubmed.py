@@ -1292,104 +1292,164 @@ def _classify_pubmed_xml(xml_string: str) -> str:
 
 # ---------------------------------------------------------------------------
 
+
+import re
+import xml.etree.ElementTree as ET
+from typing import List, Tuple, Dict, Pattern, Union
+
+# -------------------------------------------------------------
+# external helper (unchanged – assumes it exists in your code)
+# -------------------------------------------------------------
+# def _classify_pubmed_xml(xml_string: str) -> str: ...
+
 def get_jats_text_chunks(
     xml_string: str,
     *,
     min_len: int = 40,
     keywords: Union[None, str, Pattern, List[Union[str, Pattern]]] = None,
     include_table_cells: bool = False,
-    text_only: bool = False,              # NEW: return bare strings when True
+    include_tables: bool = False,
+    text_only: bool = False,
 ) -> Union[List[str], List[Tuple[str, Dict[str, str]]]]:
     """
-    Extract meaningful text chunks from a JATS full-text XML document.
+    Return meaningful chunks from a JATS full-text article.
+
+    Changes vs. original:
+    ---------------------
+    • `include_tables`  – When True, each <table-wrap>/<table> is flattened
+      once (caption + tab-separated rows); default False.
+    • Chunks BELOW `min_len` are *retained* by merging them into the
+      next chunk (or previous if they are last).  Nothing is lost.
+    • Existing options (`include_table_cells`, keyword filtering, etc.)
+      continue to work.
 
     Parameters
     ----------
-    xml_string
-        Raw XML as a string.
-    min_len
-        Minimum number of characters a chunk must have to be kept.
-    keywords
-        A pattern or list of patterns; chunks are kept only if *any* keyword
-        matches their text (case-insensitive).
-    include_table_cells
-        If True, include <td> elements as chunks.
-    text_only
-        If True, return `List[str]` with chunk text only.
-        If False (default), return `List[Tuple[str, Dict[str, str]]]`
-        where the dict provides structural context.
-
-    Raises
-    ------
-    ValueError
-        If the XML does not look like JATS full text.
+    (same as before – see docstring below for full details)
     """
 
+    # ------------------------------------------------------------------ #
+    # 0.  Basic validation                                               #
+    # ------------------------------------------------------------------ #
     if _classify_pubmed_xml(xml_string) != "pmc":
         raise ValueError("XML does not look like JATS full text")
 
-    # -- parse, fixing bare ampersands if necessary --------------------------
+    # ------------------------------------------------------------------ #
+    # 1.  Robust XML parse                                               #
+    # ------------------------------------------------------------------ #
     try:
         root = ET.fromstring(xml_string)
     except ET.ParseError:
-        safe_xml = re.sub(r"&(?!amp;|lt;|gt;|apos;|quot;)", "&amp;", xml_string)
-        root = ET.fromstring(safe_xml)
+        fixed = re.sub(r"&(?!amp;|lt;|gt;|apos;|quot;)", "&amp;", xml_string)
+        root = ET.fromstring(fixed)
 
-    # -- compile keyword patterns -------------------------------------------
+    # ------------------------------------------------------------------ #
+    # 2.  Compile keyword regexes                                        #
+    # ------------------------------------------------------------------ #
     if keywords is None:
         kw_res: List[Pattern] = []
     else:
         if not isinstance(keywords, list):
             keywords = [keywords]
         kw_res = [
-            re.compile(pat, re.I) if isinstance(pat, str) else pat
-            for pat in keywords
+            re.compile(p, re.I) if isinstance(p, str) else p
+            for p in keywords
         ]
 
-    chunks: List[Tuple[str, Dict[str, str]]] = []
-    captured_article_title = False
+    # ------------------------------------------------------------------ #
+    # 3.  Helper to flatten full tables                                  #
+    # ------------------------------------------------------------------ #
+    def _table_to_text(tbl_el: ET.Element) -> str:
+        caption_el = tbl_el.find(".//caption")
+        caption = "".join(caption_el.itertext()).strip() if caption_el is not None else ""
+        rows = []
+        for tr in tbl_el.findall(".//tr"):
+            cells = [" ".join(c.itertext()).strip() for c in tr]
+            if cells:
+                rows.append("\t".join(cells))
+        return (caption + "\n" if caption else "") + "\n".join(rows)
 
-    # -- depth-first traversal ----------------------------------------------
+    # ------------------------------------------------------------------ #
+    # 4.  DFS traversal collecting *all* candidate chunks                #
+    # ------------------------------------------------------------------ #
+    table_tags = {"table-wrap", "table"}
+    candidates: List[Tuple[str, Dict[str, str]]] = []
+    captured_title = False  # emit article title only once
+
     def recurse(el: ET.Element, sec_stack: List[str]) -> None:
-        nonlocal captured_article_title
-
+        nonlocal captured_title
         tag = el.tag
 
-        # keep track of current <sec> titles
+        # keep track of current <sec> title hierarchy
         if tag == "sec":
-            title_el = el.find("title")
-            sec_title = "".join(title_el.itertext()).strip() if title_el is not None else ""
-            sec_stack.append(sec_title)
+            t_el = el.find("title")
+            sec_stack.append("".join(t_el.itertext()).strip() if t_el is not None else "")
 
-        # decide whether this element is a “chunk”
         collect = (
             tag in {"p", "li", "caption"}
-            or tag in {"title", "article-title"} and not sec_stack and not captured_article_title
-            or tag == "td" and include_table_cells
+            or (tag in {"title", "article-title"} and not sec_stack and not captured_title)
+            or (tag == "td" and include_table_cells)
+            or (tag in table_tags and include_tables)
         )
         if tag in {"title", "article-title"} and collect:
-            captured_article_title = True
+            captured_title = True
 
         if collect:
-            txt = "".join(el.itertext()).strip()
-            if len(txt) >= min_len and (not kw_res or any(r.search(txt) for r in kw_res)):
-                ctx = {
-                    "tag": tag,
-                    "section": sec_stack[-1] if sec_stack else "",
-                    "parent_sec": sec_stack[-2] if len(sec_stack) > 1 else "",
-                }
-                chunks.append((txt, ctx))
+            txt = _table_to_text(el) if tag in table_tags else "".join(el.itertext()).strip()
+            ctx = {
+                "tag": tag,
+                "section": sec_stack[-1] if sec_stack else "",
+                "parent_sec": sec_stack[-2] if len(sec_stack) > 1 else "",
+            }
+            # keyword filter now – keep everything; we'll merge later
+            if not kw_res or any(r.search(txt) for r in kw_res):
+                candidates.append((txt, ctx))
+            # don’t descend into table internals if we already grabbed it whole
+            if tag in table_tags:
+                if tag == "sec":  # rare but just in case
+                    sec_stack.pop()
+                return
 
-        # recurse into children
         for child in el:
             recurse(child, sec_stack)
-
         if tag == "sec":
             sec_stack.pop()
 
     recurse(root, [])
 
-    # -- return in requested format -----------------------------------------
+    # ------------------------------------------------------------------ #
+    # 5.  Merge short chunks into neighbours                             #
+    # ------------------------------------------------------------------ #
+    merged: List[Tuple[str, Dict[str, str]]] = []
+    i = 0
+    while i < len(candidates):
+        txt, ctx = candidates[i]
+        if len(txt) >= min_len:
+            merged.append((txt, ctx))
+            i += 1
+            continue
+
+        # txt is SHORT – decide whom to merge with
+        if i + 1 < len(candidates):                     #  → merge into next
+            nxt_txt, nxt_ctx = candidates[i + 1]
+            candidates[i + 1] = (txt + " " + nxt_txt, nxt_ctx)
+        elif merged:                                   #  → merge into previous
+            prev_txt, prev_ctx = merged[-1]
+            merged[-1] = (prev_txt + " " + txt, prev_ctx)
+        else:                                          # only chunk; just keep it
+            merged.append((txt, ctx))
+        i += 1
+
+    # optional second pass: remove any super-short trailing chunk that
+    # still ended up under min_len (edge-case: single very short article)
+    if merged and len(merged[-1][0]) < min_len and len(merged) > 1:
+        prev_txt, prev_ctx = merged[-2]
+        merged[-2] = (prev_txt + " " + merged[-1][0], prev_ctx)
+        merged.pop()
+
+    # ------------------------------------------------------------------ #
+    # 6.  Return in requested format                                     #
+    # ------------------------------------------------------------------ #
     if text_only:
-        return [txt for txt, _ in chunks]
-    return chunks
+        return [t for t, _ in merged]
+    return merged
