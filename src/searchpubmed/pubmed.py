@@ -697,24 +697,21 @@ def _strip_default_ns(xml_bytes: bytes) -> bytes:
     return re.sub(rb'\sxmlns="[^"]+"', b"", xml_bytes, count=1)
     
     
-# ──────────────────────────────────────────────────────────────
-#  Internal helper: classifies an XML payload as
-#  'medline', 'pmc', or 'unknown' in O(1) time.
-# ──────────────────────────────────────────────────────────────
-def _classify_pubmed_xml(xml_str: str) -> str:
+def _classify_pubmed_xml(xml_str: str, *, probe: int = 4096) -> str:
     """
-    Very fast heuristic:
-        • <article …>            → 'pmc'   (JATS full-text from PMC)
-        • <PubmedArticle…> /     → 'medline' (MEDLINE/PubMed citation)
-          <MedlineCitation…>
-        • anything else          → 'unknown'
+    Classify an XML payload as
+      'pmc'      – JATS full-text (root <article>)
+      'medline'  – PubMed/MEDLINE citation (<PubmedArticle> or <MedlineCitation>)
+      'unknown'  – anything else / malformed
+    The first `probe` bytes are inspected case-insensitively.
     """
     if not xml_str or xml_str == "N/A":
         return "unknown"
-    sniff = xml_str.lstrip()[:72].lower()      # cheap prefix check
-    if sniff.startswith("<article"):
+
+    head = xml_str.lstrip()[:probe].lower()       # still O(1) w.r.t. file size
+    if re.search(r"<article\b", head):
         return "pmc"
-    if "<medlinecitation" in sniff or "<pubmedarticle" in sniff:
+    if re.search(r"<pubmedarticle\b", head) or re.search(r"<medlinecitation\b", head):
         return "medline"
     return "unknown"
 
@@ -1283,24 +1280,11 @@ def extract_full_text_from_xml(xml_string: str) -> str:
 
 
 
-# -- helper ------------------------------------------------------------------
-
-def _classify_pubmed_xml(xml_string: str) -> str:
-    """Very small stub – replace with your real detector."""
-    return "pmc" if "<article" in xml_string and "<body" in xml_string else "other"
-
-
 # ---------------------------------------------------------------------------
-
 
 import re
 import xml.etree.ElementTree as ET
 from typing import List, Tuple, Dict, Pattern, Union
-
-# -------------------------------------------------------------
-# external helper (unchanged – assumes it exists in your code)
-# -------------------------------------------------------------
-# def _classify_pubmed_xml(xml_string: str) -> str: ...
 
 def get_jats_text_chunks(
     xml_string: str,
@@ -1310,22 +1294,21 @@ def get_jats_text_chunks(
     include_table_cells: bool = False,
     include_tables: bool = False,
     text_only: bool = False,
-) -> Union[List[str], List[Tuple[str, Dict[str, str]]]]:
+) -> Union[List[str], List[Tuple[str, Dict[str, Union[str, bool]]]]]:
     """
-    Return meaningful chunks from a JATS full-text article.
+    Extract meaningful text chunks from a JATS article *and* return
+    lightweight metadata for every chunk.
 
-    Changes vs. original:
-    ---------------------
-    • `include_tables`  – When True, each <table-wrap>/<table> is flattened
-      once (caption + tab-separated rows); default False.
-    • Chunks BELOW `min_len` are *retained* by merging them into the
-      next chunk (or previous if they are last).  Nothing is lost.
-    • Existing options (`include_table_cells`, keyword filtering, etc.)
-      continue to work.
+    New metadata keys
+    -----------------
+    • section        – visible heading text at the current level
+    • parent_sec     – visible heading one level up
+    • section_type   – the <sec> element’s “sec-type” (methods, results…)
+                       or "abstract" while inside <abstract>
+    • in_abstract    – bool flag: True only for text coming from <abstract>
 
-    Parameters
-    ----------
-    (same as before – see docstring below for full details)
+    Other behaviour is unchanged: short chunks are merged, optional keyword
+    filtering, optional table flattening, etc.
     """
 
     # ------------------------------------------------------------------ #
@@ -1351,10 +1334,7 @@ def get_jats_text_chunks(
     else:
         if not isinstance(keywords, list):
             keywords = [keywords]
-        kw_res = [
-            re.compile(p, re.I) if isinstance(p, str) else p
-            for p in keywords
-        ]
+        kw_res = [re.compile(p, re.I) if isinstance(p, str) else p for p in keywords]
 
     # ------------------------------------------------------------------ #
     # 3.  Helper to flatten full tables                                  #
@@ -1370,21 +1350,36 @@ def get_jats_text_chunks(
         return (caption + "\n" if caption else "") + "\n".join(rows)
 
     # ------------------------------------------------------------------ #
-    # 4.  DFS traversal collecting *all* candidate chunks                #
+    # 4.  DFS traversal collecting chunks                                #
     # ------------------------------------------------------------------ #
     table_tags = {"table-wrap", "table"}
-    candidates: List[Tuple[str, Dict[str, str]]] = []
-    captured_title = False  # emit article title only once
+    candidates: List[Tuple[str, Dict[str, Union[str, bool]]]] = []
+    captured_title = False
 
-    def recurse(el: ET.Element, sec_stack: List[str]) -> None:
-        nonlocal captured_title
+    sec_stack: List[str] = []
+    sec_type_stack: List[str] = []
+    in_abstract = False  # Set while walking inside <abstract>
+
+    def recurse(el: ET.Element) -> None:
+        nonlocal captured_title, in_abstract
+
         tag = el.tag
 
-        # keep track of current <sec> title hierarchy
-        if tag == "sec":
-            t_el = el.find("title")
-            sec_stack.append("".join(t_el.itertext()).strip() if t_el is not None else "")
+        # ---- entering structural nodes --------------------------------
+        if tag == "abstract":
+            in_abstract = True
+            sec_stack.append("Abstract")
+            sec_type_stack.append("abstract")
 
+        elif tag == "sec":
+            title_el = el.find("title")
+            sec_title = "".join(title_el.itertext()).strip() if title_el is not None else ""
+            sec_type = el.get("sec-type", "")
+            # If no visible title, fall back to sec-type
+            sec_stack.append(sec_title or sec_type)
+            sec_type_stack.append(sec_type)
+
+        # ---- decide if this element yields a text chunk ---------------
         collect = (
             tag in {"p", "li", "caption"}
             or (tag in {"title", "article-title"} and not sec_stack and not captured_title)
@@ -1400,27 +1395,34 @@ def get_jats_text_chunks(
                 "tag": tag,
                 "section": sec_stack[-1] if sec_stack else "",
                 "parent_sec": sec_stack[-2] if len(sec_stack) > 1 else "",
+                "section_type": sec_type_stack[-1] if sec_type_stack else "",
+                "in_abstract": in_abstract,
             }
-            # keyword filter now – keep everything; we'll merge later
             if not kw_res or any(r.search(txt) for r in kw_res):
                 candidates.append((txt, ctx))
-            # don’t descend into table internals if we already grabbed it whole
+            # If we grabbed the whole table, skip its internals
             if tag in table_tags:
-                if tag == "sec":  # rare but just in case
-                    sec_stack.pop()
                 return
 
+        # ---- descend ---------------------------------------------------
         for child in el:
-            recurse(child, sec_stack)
-        if tag == "sec":
-            sec_stack.pop()
+            recurse(child)
 
-    recurse(root, [])
+        # ---- leaving structural nodes ---------------------------------
+        if tag == "abstract":
+            in_abstract = False
+            sec_stack.pop()
+            sec_type_stack.pop()
+        elif tag == "sec":
+            sec_stack.pop()
+            sec_type_stack.pop()
+
+    recurse(root)
 
     # ------------------------------------------------------------------ #
     # 5.  Merge short chunks into neighbours                             #
     # ------------------------------------------------------------------ #
-    merged: List[Tuple[str, Dict[str, str]]] = []
+    merged: List[Tuple[str, Dict[str, Union[str, bool]]]] = []
     i = 0
     while i < len(candidates):
         txt, ctx = candidates[i]
@@ -1440,16 +1442,13 @@ def get_jats_text_chunks(
             merged.append((txt, ctx))
         i += 1
 
-    # optional second pass: remove any super-short trailing chunk that
-    # still ended up under min_len (edge-case: single very short article)
+    # optional second pass: remove trailing ultra-short chunk
     if merged and len(merged[-1][0]) < min_len and len(merged) > 1:
         prev_txt, prev_ctx = merged[-2]
         merged[-2] = (prev_txt + " " + merged[-1][0], prev_ctx)
         merged.pop()
 
     # ------------------------------------------------------------------ #
-    # 6.  Return in requested format                                     #
+    # 6.  Return                                                         #
     # ------------------------------------------------------------------ #
-    if text_only:
-        return [t for t, _ in merged]
-    return merged
+    return [t for t, _ in merged] if text_only else merged
