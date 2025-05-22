@@ -1332,7 +1332,7 @@ def get_jats_text_chunks(
         collect = False
         if tag == "p":
             collect = True
-        elif tag == "title" and not sec_stack and not captured_article_title:
+        elif tag in ("title", "article-title") and not sec_stack and not captured_article_title:
             collect = True
             captured_article_title = True
         elif tag == "caption":
