@@ -19,7 +19,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from math import ceil
-from typing import List, Dict
+from typing import List, Dict, Tuple, Union, Pattern
 
 import dateparser
 import pandas as pd
@@ -1280,3 +1280,84 @@ def extract_full_text_from_xml(xml_string: str) -> str:
                                 blocks.append(text)
 
     return "\n\n".join(blocks)
+
+
+def get_jats_text_chunks(
+    xml_string: str,
+    *,
+    min_len: int = 40,
+    keywords: Union[None, str, Pattern, List[Union[str, Pattern]]] = None,
+    include_table_cells: bool = False,
+) -> List[Tuple[str, Dict[str, str]]]:
+    """Return meaningful text chunks from a JATS XML article.
+
+    The function first verifies that the provided ``xml_string`` appears to be
+    JATS full text and then extracts paragraphs, captions, and optionally table
+    cells along with their structural context.
+
+    Parameters are equivalent to :func:`get_pmc_full_xml`, with the ``keywords``
+    argument accepting a regular expression or list of them to filter the
+    resulting chunks.
+    """
+
+    if _classify_pubmed_xml(xml_string) != "pmc":
+        raise ValueError("XML does not look like JATS full text")
+
+    try:
+        root = ET.fromstring(xml_string)
+    except ET.ParseError:
+        xml_string = re.sub(r"&(?!amp;|lt;|gt;|apos;|quot;)", "&amp;", xml_string)
+        root = ET.fromstring(xml_string)
+
+    if keywords is None:
+        kw_res = []
+    else:
+        if not isinstance(keywords, list):
+            keywords = [keywords]
+        kw_res = [re.compile(pat, re.I) if isinstance(pat, str) else pat for pat in keywords]
+
+    chunks: List[Tuple[str, Dict[str, str]]] = []
+    captured_article_title = False
+
+    def recurse(el: ET.Element, sec_stack: List[str]) -> None:
+        nonlocal captured_article_title
+
+        tag = el.tag
+
+        if tag == "sec":
+            title_el = el.find("title")
+            sec_title = "".join(title_el.itertext()).strip() if title_el is not None else ""
+            sec_stack.append(sec_title)
+
+        collect = False
+        if tag == "p":
+            collect = True
+        elif tag == "title" and not sec_stack and not captured_article_title:
+            collect = True
+            captured_article_title = True
+        elif tag == "caption":
+            collect = True
+        elif tag == "li":
+            collect = True
+        elif tag == "td" and include_table_cells:
+            collect = True
+
+        if collect:
+            txt = "".join(el.itertext()).strip()
+            if len(txt) >= min_len:
+                if not kw_res or any(r.search(txt) for r in kw_res):
+                    ctx = {
+                        "tag": tag,
+                        "section": sec_stack[-1] if sec_stack else "",
+                        "parent_sec": sec_stack[-2] if len(sec_stack) > 1 else "",
+                    }
+                    chunks.append((txt, ctx))
+
+        for child in el:
+            recurse(child, sec_stack)
+
+        if tag == "sec":
+            sec_stack.pop()
+
+    recurse(root, [])
+    return chunks
