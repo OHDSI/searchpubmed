@@ -1280,11 +1280,6 @@ def extract_full_text_from_xml(xml_string: str) -> str:
 
 
 
-# ---------------------------------------------------------------------------
-
-import re
-import xml.etree.ElementTree as ET
-from typing import List, Tuple, Dict, Pattern, Union
 
 def get_jats_text_chunks(
     xml_string: str,
@@ -1294,27 +1289,74 @@ def get_jats_text_chunks(
     include_table_cells: bool = False,
     include_tables: bool = False,
     text_only: bool = False,
-) -> Union[List[str], List[Tuple[str, Dict[str, Union[str, bool]]]]]:
+    include_abstract_headings: bool = True,
+    include_section_headings: bool = True,
+) -> Union[List[str], List[Tuple[str, Dict[str, str]]]]:
     """
-    Extract meaningful text chunks from a JATS article *and* return
-    lightweight metadata for every chunk.
+    Chunk JATS (Journal Article Tag Suite) XML into human-readable blocks.
 
-    New metadata keys
-    -----------------
-    • section        – visible heading text at the current level
-    • parent_sec     – visible heading one level up
-    • section_type   – the <sec> element’s “sec-type” (methods, results…)
-                       or "abstract" while inside <abstract>
-    • in_abstract    – bool flag: True only for text coming from <abstract>
+    The parser walks the document depth-first, collecting paragraphs, list
+    items, captions, headings, table cells or whole tables, then **merges short
+    headings into the first paragraph that follows them**.  Each chunk can be
+    returned either as a plain string or as a *(text, metadata)* pair.
 
-    Other behaviour is unchanged: short chunks are merged, optional keyword
-    filtering, optional table flattening, etc.
+    Parameters
+    ----------
+    xml_string : str
+        Raw PMC-style JATS XML.  Raises ``ValueError`` if this does not look
+        like PubMed Central full text.
+    min_len : int, default ``40``
+        Minimum characters for an isolated chunk.  Anything shorter is
+        concatenated onto its neighbour.
+    keywords : {None, str, Pattern, list}, optional
+        One or more case-insensitive regexes.  Only chunks matching *any*
+        pattern are kept.  ``None`` disables filtering.
+    include_table_cells : bool, default ``False``
+        Emit a chunk for every ``<td>``.
+    include_tables : bool, default ``False``
+        Flatten whole ``<table>`` / ``<table-wrap>`` elements into single
+        chunks (caption + tab-separated rows).
+    text_only : bool, default ``False``
+        • ``True``  → return ``List[str]``  
+        • ``False`` → return ``List[Tuple[str, dict]]``
+    include_abstract_headings : bool, default ``True``
+        Capture ``<title>`` elements that live *inside* an ``<abstract>``.
+    include_section_headings : bool, default ``True``
+        Capture ``<title>`` elements under any other ``<sec>``.
+
+    Returns
+    -------
+    list
+        *If* ``text_only is True``  
+            ``List[str]`` – plain-text chunks.
+
+        *Else*  
+            ``List[Tuple[str, dict]]`` – each tuple contains:
+
+            ``text`` : str  
+                The merged chunk.
+
+            ``meta`` : dict[str, str]  
+                • ``tag``          XML element that produced the chunk  
+                • ``section``     visible heading at this depth  
+                • ``parent_sec``  heading one level up (``""`` at top)  
+                • ``section_type`` value of ``<sec sec-type="…">`` *or*
+                                   ``"abstract"`` while inside the abstract  
+                  *(Use this to tell whether the chunk comes from the abstract.)*
+
+    Notes
+    -----
+    * **“In abstract?”** – simply check  
+      ``chunk_meta["section_type"] == "abstract"``.
+    * **Keyword filtering** happens *after* heading-paragraph merging.
+    * When *include_tables* is ``True`` the parser does **not** descend into
+      that table; individual cells or nested captions are skipped.
     """
 
     # ------------------------------------------------------------------ #
     # 0.  Basic validation                                               #
     # ------------------------------------------------------------------ #
-    if _classify_pubmed_xml(xml_string) != "pmc":
+    if _classify_pubmed_xml(xml_string) != "pmc":           # pragma: no cover
         raise ValueError("XML does not look like JATS full text")
 
     # ------------------------------------------------------------------ #
@@ -1353,21 +1395,19 @@ def get_jats_text_chunks(
     # 4.  DFS traversal collecting chunks                                #
     # ------------------------------------------------------------------ #
     table_tags = {"table-wrap", "table"}
-    candidates: List[Tuple[str, Dict[str, Union[str, bool]]]] = []
+    candidates: List[Tuple[str, Dict[str, str]]] = []
     captured_title = False
 
     sec_stack: List[str] = []
     sec_type_stack: List[str] = []
-    in_abstract = False  # Set while walking inside <abstract>
 
     def recurse(el: ET.Element) -> None:
-        nonlocal captured_title, in_abstract
+        nonlocal captured_title
 
         tag = el.tag
 
         # ---- entering structural nodes --------------------------------
         if tag == "abstract":
-            in_abstract = True
             sec_stack.append("Abstract")
             sec_type_stack.append("abstract")
 
@@ -1375,33 +1415,41 @@ def get_jats_text_chunks(
             title_el = el.find("title")
             sec_title = "".join(title_el.itertext()).strip() if title_el is not None else ""
             sec_type = el.get("sec-type", "")
-            # If no visible title, fall back to sec-type
             sec_stack.append(sec_title or sec_type)
             sec_type_stack.append(sec_type)
 
         # ---- decide if this element yields a text chunk ---------------
+
+        current_sec_type = sec_type_stack[-1] if sec_type_stack else ""
+
         collect = (
             tag in {"p", "li", "caption"}
             or (tag in {"title", "article-title"} and not sec_stack and not captured_title)
+            or (
+                tag == "title"
+                and (
+                    (current_sec_type == "abstract" and include_abstract_headings)
+                    or (current_sec_type != "abstract" and include_section_headings)
+                )
+            )
             or (tag == "td" and include_table_cells)
             or (tag in table_tags and include_tables)
         )
-        if tag in {"title", "article-title"} and collect:
-            captured_title = True
+
+        if tag in {"title", "article-title"} and collect and not sec_stack:
+            captured_title = True     # only affects the *article* title
 
         if collect:
             txt = _table_to_text(el) if tag in table_tags else "".join(el.itertext()).strip()
-            ctx = {
+            ctx: Dict[str, str] = {
                 "tag": tag,
                 "section": sec_stack[-1] if sec_stack else "",
                 "parent_sec": sec_stack[-2] if len(sec_stack) > 1 else "",
-                "section_type": sec_type_stack[-1] if sec_type_stack else "",
-                "in_abstract": in_abstract,
+                "section_type": current_sec_type,
             }
             if not kw_res or any(r.search(txt) for r in kw_res):
                 candidates.append((txt, ctx))
-            # If we grabbed the whole table, skip its internals
-            if tag in table_tags:
+            if tag in table_tags:          # grabbed full table ⇒ skip children
                 return
 
         # ---- descend ---------------------------------------------------
@@ -1409,11 +1457,7 @@ def get_jats_text_chunks(
             recurse(child)
 
         # ---- leaving structural nodes ---------------------------------
-        if tag == "abstract":
-            in_abstract = False
-            sec_stack.pop()
-            sec_type_stack.pop()
-        elif tag == "sec":
+        if tag in {"abstract", "sec"}:
             sec_stack.pop()
             sec_type_stack.pop()
 
@@ -1422,7 +1466,7 @@ def get_jats_text_chunks(
     # ------------------------------------------------------------------ #
     # 5.  Merge short chunks into neighbours                             #
     # ------------------------------------------------------------------ #
-    merged: List[Tuple[str, Dict[str, Union[str, bool]]]] = []
+    merged: List[Tuple[str, Dict[str, str]]] = []
     i = 0
     while i < len(candidates):
         txt, ctx = candidates[i]
