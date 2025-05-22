@@ -1282,77 +1282,105 @@ def extract_full_text_from_xml(xml_string: str) -> str:
     return "\n\n".join(blocks)
 
 
+
+# -- helper ------------------------------------------------------------------
+
+def _classify_pubmed_xml(xml_string: str) -> str:
+    """Very small stub – replace with your real detector."""
+    return "pmc" if "<article" in xml_string and "<body" in xml_string else "other"
+
+
+# ---------------------------------------------------------------------------
+
 def get_jats_text_chunks(
     xml_string: str,
     *,
     min_len: int = 40,
     keywords: Union[None, str, Pattern, List[Union[str, Pattern]]] = None,
     include_table_cells: bool = False,
-) -> List[Tuple[str, Dict[str, str]]]:
-    """Return meaningful text chunks from a JATS XML article.
+    text_only: bool = False,              # NEW: return bare strings when True
+) -> Union[List[str], List[Tuple[str, Dict[str, str]]]]:
+    """
+    Extract meaningful text chunks from a JATS full-text XML document.
 
-    The function first verifies that the provided ``xml_string`` appears to be
-    JATS full text and then extracts paragraphs, captions, and optionally table
-    cells along with their structural context.
+    Parameters
+    ----------
+    xml_string
+        Raw XML as a string.
+    min_len
+        Minimum number of characters a chunk must have to be kept.
+    keywords
+        A pattern or list of patterns; chunks are kept only if *any* keyword
+        matches their text (case-insensitive).
+    include_table_cells
+        If True, include <td> elements as chunks.
+    text_only
+        If True, return `List[str]` with chunk text only.
+        If False (default), return `List[Tuple[str, Dict[str, str]]]`
+        where the dict provides structural context.
 
-    Parameters are equivalent to :func:`get_pmc_full_xml`, with the ``keywords``
-    argument accepting a regular expression or list of them to filter the
-    resulting chunks.
+    Raises
+    ------
+    ValueError
+        If the XML does not look like JATS full text.
     """
 
     if _classify_pubmed_xml(xml_string) != "pmc":
         raise ValueError("XML does not look like JATS full text")
 
+    # -- parse, fixing bare ampersands if necessary --------------------------
     try:
         root = ET.fromstring(xml_string)
     except ET.ParseError:
-        xml_string = re.sub(r"&(?!amp;|lt;|gt;|apos;|quot;)", "&amp;", xml_string)
-        root = ET.fromstring(xml_string)
+        safe_xml = re.sub(r"&(?!amp;|lt;|gt;|apos;|quot;)", "&amp;", xml_string)
+        root = ET.fromstring(safe_xml)
 
+    # -- compile keyword patterns -------------------------------------------
     if keywords is None:
-        kw_res = []
+        kw_res: List[Pattern] = []
     else:
         if not isinstance(keywords, list):
             keywords = [keywords]
-        kw_res = [re.compile(pat, re.I) if isinstance(pat, str) else pat for pat in keywords]
+        kw_res = [
+            re.compile(pat, re.I) if isinstance(pat, str) else pat
+            for pat in keywords
+        ]
 
     chunks: List[Tuple[str, Dict[str, str]]] = []
     captured_article_title = False
 
+    # -- depth-first traversal ----------------------------------------------
     def recurse(el: ET.Element, sec_stack: List[str]) -> None:
         nonlocal captured_article_title
 
         tag = el.tag
 
+        # keep track of current <sec> titles
         if tag == "sec":
             title_el = el.find("title")
             sec_title = "".join(title_el.itertext()).strip() if title_el is not None else ""
             sec_stack.append(sec_title)
 
-        collect = False
-        if tag == "p":
-            collect = True
-        elif tag in ("title", "article-title") and not sec_stack and not captured_article_title:
-            collect = True
+        # decide whether this element is a “chunk”
+        collect = (
+            tag in {"p", "li", "caption"}
+            or tag in {"title", "article-title"} and not sec_stack and not captured_article_title
+            or tag == "td" and include_table_cells
+        )
+        if tag in {"title", "article-title"} and collect:
             captured_article_title = True
-        elif tag == "caption":
-            collect = True
-        elif tag == "li":
-            collect = True
-        elif tag == "td" and include_table_cells:
-            collect = True
 
         if collect:
             txt = "".join(el.itertext()).strip()
-            if len(txt) >= min_len:
-                if not kw_res or any(r.search(txt) for r in kw_res):
-                    ctx = {
-                        "tag": tag,
-                        "section": sec_stack[-1] if sec_stack else "",
-                        "parent_sec": sec_stack[-2] if len(sec_stack) > 1 else "",
-                    }
-                    chunks.append((txt, ctx))
+            if len(txt) >= min_len and (not kw_res or any(r.search(txt) for r in kw_res)):
+                ctx = {
+                    "tag": tag,
+                    "section": sec_stack[-1] if sec_stack else "",
+                    "parent_sec": sec_stack[-2] if len(sec_stack) > 1 else "",
+                }
+                chunks.append((txt, ctx))
 
+        # recurse into children
         for child in el:
             recurse(child, sec_stack)
 
@@ -1360,4 +1388,8 @@ def get_jats_text_chunks(
             sec_stack.pop()
 
     recurse(root, [])
+
+    # -- return in requested format -----------------------------------------
+    if text_only:
+        return [txt for txt, _ in chunks]
     return chunks
