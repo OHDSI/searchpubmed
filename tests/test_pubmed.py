@@ -93,6 +93,48 @@ def test_get_pmid_total_failure(monkeypatch):
     assert p.get_pmid_from_pubmed("x") == []
 
 
+def test_get_pmid_http_error_no_retry(monkeypatch, caplog):
+    import searchpubmed.pubmed as p
+
+    # A 400 error should not be retried
+    monkeypatch.setattr(p.requests, "post",
+                        lambda *a, **k: DummyResp(status=400, text="Bad Request"))
+
+    with caplog.at_level(p.logging.ERROR):
+        pmids = p.get_pmid_from_pubmed("test")
+
+    assert pmids == []
+    assert "ESearch failed (HTTP 400)" in caplog.text
+
+
+def test_get_pmid_xml_parse_error(monkeypatch, caplog):
+    import searchpubmed.pubmed as p
+
+    # Valid response, but malformed XML
+    monkeypatch.setattr(p.requests, "post",
+                        lambda *a, **k: DummyResp(content=b"<malformed"))
+
+    with caplog.at_level(p.logging.ERROR):
+        pmids = p.get_pmid_from_pubmed("test")
+
+    assert pmids == []
+    assert "ESearch XML parse error" in caplog.text
+
+def test_get_pmid_with_api_key(monkeypatch):
+    import searchpubmed.pubmed as p
+
+    called_params = {}
+
+    def mock_post(*args, **kwargs):
+        called_params.update(kwargs.get('data', {}))
+        return _OK_XML
+
+    monkeypatch.setattr(p.requests, "post", mock_post)
+    p.get_pmid_from_pubmed("cancer", api_key="MY_KEY")
+
+    assert called_params.get("api_key") == "MY_KEY"
+
+
 # --------------------------------------------------------------------------- #
 # map_pmids_to_pmcids()                                                       #
 # --------------------------------------------------------------------------- #
@@ -129,6 +171,70 @@ def test_map_pmids_http_error(monkeypatch):
                         lambda *_a, **_k: DummyResp(text="fail", status=500))
 
     df = p.map_pmids_to_pmcids(["42"])
+    assert pd.isna(df.loc[0, "pmcid"])
+
+
+def test_map_pmids_empty_input():
+    import searchpubmed.pubmed as p
+    df = p.map_pmids_to_pmcids([])
+    assert df.empty
+    assert list(df.columns) == ["pmid", "pmcid"]
+
+def test_map_pmids_with_api_key(monkeypatch):
+    import searchpubmed.pubmed as p
+
+    called_data = []
+
+    def mock_post(*args, **kwargs):
+        # The data is a list of tuples
+        called_data.extend(kwargs.get('data', []))
+        return _ELINK_XML
+
+    monkeypatch.setattr(p.requests.Session, "post", mock_post)
+    p.map_pmids_to_pmcids(["111"], api_key="MY_KEY")
+
+    assert ("api_key", "MY_KEY") in called_data
+
+def test_map_pmids_retries_then_success(monkeypatch, caplog):
+    import searchpubmed.pubmed as p
+
+    calls = {"n": 0}
+    def flaky(*_args, **_kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return DummyResp(text="boom", status=503)
+        return _ELINK_XML
+
+    monkeypatch.setattr(p.requests.Session, "post", flaky)
+    with caplog.at_level(p.logging.WARNING):
+        df = p.map_pmids_to_pmcids(["111"], max_retries=2, delay=0)
+
+    assert calls["n"] == 2
+    assert "retry 1/2" in caplog.text
+    expected = pd.DataFrame({"pmid": ["111"], "pmcid": ["PMC555"]}, dtype="string")
+    assert_frame_equal(df, expected)
+
+def test_map_pmids_total_failure(monkeypatch, caplog):
+    import searchpubmed.pubmed as p
+
+    monkeypatch.setattr(p.requests.Session, "post", lambda *a, **k: (_ for _ in ()).throw(requests.RequestException("network down")))
+
+    with caplog.at_level(p.logging.ERROR):
+        df = p.map_pmids_to_pmcids(["111"])
+
+    assert "Batch 1 failed" in caplog.text
+    assert pd.isna(df.loc[0, "pmcid"])
+    assert df.loc[0, "pmid"] == "111"
+
+def test_map_pmids_xml_parse_error(monkeypatch, caplog):
+    import searchpubmed.pubmed as p
+
+    monkeypatch.setattr(p.requests.Session, "post", lambda *a, **k: DummyResp(content=b"<malformed"))
+
+    with caplog.at_level(p.logging.ERROR):
+        df = p.map_pmids_to_pmcids(["111"])
+
+    assert "XML parse error for batch 1" in caplog.text
     assert pd.isna(df.loc[0, "pmcid"])
 
 
